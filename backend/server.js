@@ -1,38 +1,18 @@
 const express = require('express');
-const cors = require('cors');
 const https = require('https');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// CORS configuration - allow frontend origin
-const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
-  : ['http://localhost:5500', 'http://127.0.0.1:5500', 'http://localhost:3000'];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like curl, Postman, or server-to-server)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Target-Url']
-}));
-
 app.use(express.json({ limit: '1mb' }));
+
+// Serve frontend static files from ../frontend
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 // Health check endpoint - Render uses this to verify the service is running
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'jarvis-backend', timestamp: new Date().toISOString() });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({ message: 'JARVIS Backend API', version: '1.0.0', endpoints: ['/api/chat', '/health'] });
+  res.json({ status: 'ok', service: 'jarvis', timestamp: new Date().toISOString() });
 });
 
 // Proxy endpoint for AI API calls
@@ -78,7 +58,11 @@ app.post('/api/chat', (req, res) => {
   proxyReq.end();
 });
 
+// Fallback: serve index.html for any non-API route (SPA support)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`JARVIS Backend running on port ${PORT}`);
-  console.log(`Allowed origins: ${allowedOrigins.join(', ')}`);
+  console.log(`JARVIS running on port ${PORT}`);
 });

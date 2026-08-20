@@ -2,9 +2,6 @@
 // JARVIS AI - Frontend Application
 // ============================================================
 
-// Backend API URL - Configure this for your deployment
-// In production on Render, set this to your backend service URL
-const API_BASE_URL = window.JARVIS_API_URL || '';
 
 // DOM Elements
 const orb = document.getElementById('jarvis-orb');
@@ -137,7 +134,7 @@ async function getAIResponse(prompt) {
     orbLabel.textContent = 'Thinking...';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
