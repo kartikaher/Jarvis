@@ -1,0 +1,27 @@
+# JARVIS AI - Render Blueprint
+# Deploy both frontend (Static Site) and backend (Web Service) from a single repo
+
+services:
+  # Backend - Node.js Web Service
+  - type: web
+    name: jarvis-backend
+    runtime: node
+    region: oregon
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        sync: false  # Set this manually after deploying frontend
+
+  # Frontend - Static Site
+  - type: web
+    name: jarvis-frontend
+    runtime: static
+    rootDir: frontend
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=3600

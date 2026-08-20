@@ -1,3 +1,11 @@
+// ============================================================
+// JARVIS AI - Frontend Application
+// ============================================================
+
+// Backend API URL - Configure this for your deployment
+// In production on Render, set this to your backend service URL
+const API_BASE_URL = window.JARVIS_API_URL || '';
+
 // DOM Elements
 const orb = document.getElementById('jarvis-orb');
 const orbLabel = document.getElementById('orb-status');
@@ -20,6 +28,7 @@ let chatMessages = JSON.parse(localStorage.getItem('jarvis_chat_history')) || []
 // Initialization
 window.addEventListener('load', () => {
     console.log('JARVIS initialized');
+    console.log('API Base URL:', API_BASE_URL || '(same origin)');
     loadChatHistory();
     // Pre-load voices
     synth.getVoices();
@@ -76,12 +85,12 @@ function speak(text) {
         synth.cancel();
     }
     const utterance = new SpeechSynthesisUtterance(text);
-    
+
     // Choose a professional sounding voice if available
     const voices = synth.getVoices();
     const preferredVoice = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Samantha'));
     if (preferredVoice) utterance.voice = preferredVoice;
-    
+
     utterance.pitch = 0.9; // Slightly lower for Jarvis feel
     utterance.rate = 1.0;
 
@@ -122,13 +131,13 @@ async function getAIResponse(prompt) {
 
     const isGroq = apiKey.startsWith('gsk_');
     const targetEndpoint = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-    const model = isGroq ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo';
+    const model = isGroq ? 'qwen/qwen3.6-27b' : 'gpt-3.5-turbo';
 
     setOrbState('thinking');
     orbLabel.textContent = 'Thinking...';
 
     try {
-        const response = await fetch('/api/chat', {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -172,7 +181,7 @@ async function getAIResponse(prompt) {
 // Main Flow
 async function handleUserMessage(text) {
     if (!text.trim()) return;
-    
+
     addMessage(text, 'user');
     userInput.value = '';
 
