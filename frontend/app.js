@@ -542,6 +542,15 @@ function toggleVoiceInput() {
 
 const synth = window.speechSynthesis;
 
+if (synth) {
+    synth.getVoices();
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = () => {
+            synth.getVoices();
+        };
+    }
+}
+
 function stopSpeech() {
     if (synth && synth.speaking) {
         synth.cancel();
@@ -570,11 +579,13 @@ function speakMessage(text, msgId = null) {
     updateSpeakerButtonsUI();
 
     const utterance = new SpeechSynthesisUtterance(text);
+
+    // Choose a professional sounding voice if available (exact original JARVIS voice selection logic)
     const voices = synth.getVoices();
-    const preferredVoice = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Samantha') || v.name.includes('Natural'));
+    const preferredVoice = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Samantha'));
     if (preferredVoice) utterance.voice = preferredVoice;
 
-    utterance.pitch = 0.9;
+    utterance.pitch = 0.9; // Slightly lower for Jarvis feel
     utterance.rate = 1.0;
 
     utterance.onstart = () => {
