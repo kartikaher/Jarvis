@@ -1,3 +1,5 @@
+require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const https = require('https');
 const path = require('path');
@@ -17,20 +19,19 @@ app.get('/health', (req, res) => {
 
 // Proxy endpoint for AI API calls
 app.post('/api/chat', (req, res) => {
-  const apiKey = (process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || '').trim();
+  const apiKey = (process.env.GROQ_API_KEY || '').trim();
 
-  if (!apiKey) {
+  if (!apiKey || apiKey === 'your_groq_api_key') {
     return res.status(500).json({
-      error: { message: 'Server API key is missing. Please set GROQ_API_KEY in server environment settings.' }
+      error: { message: 'Server GROQ_API_KEY environment variable is missing or unconfigured. Please set GROQ_API_KEY in server environment settings.' }
     });
   }
 
-  const isGroq = apiKey.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
-  const targetUrl = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-  const defaultModel = isGroq ? 'llama3-8b-8192' : 'gpt-3.5-turbo';
+  const targetUrl = 'https://api.groq.com/openai/v1/chat/completions';
+  const selectedModel = process.env.GROQ_MODEL || req.body.model || 'llama-3.3-70b-versatile';
 
   const bodyData = {
-    model: req.body.model || defaultModel,
+    model: selectedModel,
     messages: req.body.messages,
     max_tokens: req.body.max_tokens || 500
   };
