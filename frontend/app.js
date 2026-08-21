@@ -542,12 +542,87 @@ function toggleVoiceInput() {
 
 const synth = window.speechSynthesis;
 
+// ----------------------------------------------------------------
+// JARVIS Voice Configuration
+// Priority order matches the exact original laptop voice.
+// Falls back to closest male UK/US English voices rather than
+// silently picking the browser default (often a female voice).
+// ----------------------------------------------------------------
+const JARVIS_VOICE_PRIORITY = [
+    'Google UK English Male',   // Original JARVIS voice on Chrome/laptop
+    'Samantha',                  // Original JARVIS fallback (macOS/Safari)
+    'Daniel',                    // High-quality British male (macOS/iOS)
+    'Google US English',         // Chrome Android - neutral, male-ish default
+    'Microsoft David Desktop',   // Windows Edge male voice
+    'Microsoft Mark Online',     // Windows/Edge online male voice
+    'en-GB',                     // Match any en-GB voice as last resort
+];
+
+const JARVIS_VOICE_SETTINGS = {
+    pitch: 0.9,   // Slightly lower - exact original JARVIS feel
+    rate: 1.0,    // Natural speed - exact original setting
+    volume: 1.0
+};
+
+// Cache voices after async load - never call getVoices() inline in speakMessage
+let cachedVoices = [];
+let jarvisVoice = null;
+
+function selectJarvisVoice(voices) {
+    if (!voices || voices.length === 0) return null;
+
+    // Step 1: Try exact name matches in priority order
+    for (const name of JARVIS_VOICE_PRIORITY) {
+        const match = voices.find(v => v.name === name);
+        if (match) return match;
+    }
+
+    // Step 2: Partial name matches in priority order
+    for (const name of JARVIS_VOICE_PRIORITY) {
+        const match = voices.find(v => v.name.includes(name));
+        if (match) return match;
+    }
+
+    // Step 3: Any English male voice (avoid female defaults)
+    const engMale = voices.find(v =>
+        (v.lang.startsWith('en')) &&
+        (v.name.toLowerCase().includes('male') || 
+         v.name.includes('David') ||
+         v.name.includes('Daniel') ||
+         v.name.includes('James') ||
+         v.name.includes('Mark'))
+    );
+    if (engMale) return engMale;
+
+    // Step 4: Any en-GB voice as last resort before falling through
+    const enGB = voices.find(v => v.lang === 'en-GB');
+    if (enGB) return enGB;
+
+    // Step 5: If truly nothing matches, return null - let browser decide
+    // rather than assigning a random female voice
+    return null;
+}
+
+function initJarvisVoice() {
+    const voices = synth.getVoices();
+    if (voices && voices.length > 0) {
+        cachedVoices = voices;
+        jarvisVoice = selectJarvisVoice(voices);
+        if (jarvisVoice) {
+            console.log(`JARVIS voice loaded: "${jarvisVoice.name}" (${jarvisVoice.lang})`);
+        } else {
+            console.warn('JARVIS: No preferred voice found, browser default will be used.');
+        }
+    }
+}
+
 if (synth) {
-    synth.getVoices();
-    if (speechSynthesis.onvoiceschanged !== undefined) {
-        speechSynthesis.onvoiceschanged = () => {
-            synth.getVoices();
-        };
+    // Trigger immediate load (works on Firefox / some Chrome)
+    initJarvisVoice();
+
+    // onvoiceschanged fires in Chrome after async load
+    if (typeof speechSynthesis.onvoiceschanged !== 'undefined') {
+        speechSynthesis.onvoiceschanged = initJarvisVoice;
     }
 }
 
@@ -580,13 +655,17 @@ function speakMessage(text, msgId = null) {
 
     const utterance = new SpeechSynthesisUtterance(text);
 
-    // Choose a professional sounding voice if available (exact original JARVIS voice selection logic)
-    const voices = synth.getVoices();
-    const preferredVoice = voices.find(v => v.name.includes('Google UK English Male') || v.name.includes('Samantha'));
-    if (preferredVoice) utterance.voice = preferredVoice;
+    // Apply the cached JARVIS voice (resolved once at load, not inline each call)
+    if (jarvisVoice) {
+        utterance.voice = jarvisVoice;
+    }
+    // If jarvisVoice is null, do NOT assign utterance.voice - let browser use its
+    // default for this language rather than assigning a random wrong voice.
 
-    utterance.pitch = 0.9; // Slightly lower for Jarvis feel
-    utterance.rate = 1.0;
+    utterance.pitch = JARVIS_VOICE_SETTINGS.pitch;
+    utterance.rate = JARVIS_VOICE_SETTINGS.rate;
+    utterance.volume = JARVIS_VOICE_SETTINGS.volume;
+    utterance.lang = jarvisVoice ? jarvisVoice.lang : 'en-GB';
 
     utterance.onstart = () => {
         setOrbState('thinking');
@@ -779,7 +858,7 @@ window.addEventListener('load', () => {
         renderFilePreview();
     }
 
-    if (synth) synth.getVoices();
+    if (synth) initJarvisVoice();
     if (userInput) userInput.focus();
 });
 
