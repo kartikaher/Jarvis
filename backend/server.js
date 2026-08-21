@@ -28,7 +28,7 @@ app.post('/api/chat', (req, res) => {
   }
 
   const targetUrl = 'https://api.groq.com/openai/v1/chat/completions';
-  const selectedModel = process.env.GROQ_MODEL || req.body.model || 'llama-3.3-70b-versatile';
+  const selectedModel = process.env.GROQ_MODEL || req.body.model || 'openai/gpt-oss-120b';
 
   const bodyData = {
     model: selectedModel,
