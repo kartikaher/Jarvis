@@ -17,19 +17,31 @@ app.get('/health', (req, res) => {
 
 // Proxy endpoint for AI API calls
 app.post('/api/chat', (req, res) => {
-  const targetUrl = req.headers['x-target-url'];
+  const apiKey = (process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || '').trim();
 
-  if (!targetUrl) {
-    return res.status(400).json({ error: { message: 'Missing X-Target-Url header' } });
+  if (!apiKey) {
+    return res.status(500).json({
+      error: { message: 'Server API key is missing. Please set GROQ_API_KEY in server environment settings.' }
+    });
   }
 
-  const postData = JSON.stringify(req.body);
+  const isGroq = apiKey.startsWith('gsk_') || Boolean(process.env.GROQ_API_KEY);
+  const targetUrl = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+  const defaultModel = isGroq ? 'llama3-8b-8192' : 'gpt-3.5-turbo';
+
+  const bodyData = {
+    model: req.body.model || defaultModel,
+    messages: req.body.messages,
+    max_tokens: req.body.max_tokens || 500
+  };
+
+  const postData = JSON.stringify(bodyData);
 
   let parsedUrl;
   try {
     parsedUrl = new URL(targetUrl);
   } catch (e) {
-    return res.status(400).json({ error: { message: 'Invalid X-Target-Url: ' + e.message } });
+    return res.status(400).json({ error: { message: 'Invalid target URL: ' + e.message } });
   }
 
   const options = {
@@ -38,7 +50,7 @@ app.post('/api/chat', (req, res) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': req.headers['authorization'] || '',
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Length': Buffer.byteLength(postData)
     }
   };

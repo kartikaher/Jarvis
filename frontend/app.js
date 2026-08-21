@@ -14,15 +14,12 @@ const voiceBtn = document.getElementById('voice-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const settingsModal = document.getElementById('settings-modal');
 const closeSettings = document.getElementById('close-settings');
-const saveSettings = document.getElementById('save-settings');
-const apiKeyInput = document.getElementById('api-key');
-
 // Configuration
-let apiKey = localStorage.getItem('jarvis_api_key') || '';
-apiKeyInput.value = apiKey;
-
 let chatMessages = JSON.parse(localStorage.getItem('jarvis_chat_history')) || [];
 let isUserScrolledUp = false;
+
+// Remove legacy client-side API key if present
+localStorage.removeItem('jarvis_api_key');
 
 // Track manual user scrolling on the container
 if (scrollContainer) {
@@ -178,14 +175,6 @@ function cleanAIResponse(text) {
 
 // AI Integration
 async function getAIResponse(prompt) {
-    if (!apiKey) {
-        return "Sir, I need an API key to function. Please provide it in the settings.";
-    }
-
-    const isGroq = apiKey.startsWith('gsk_');
-    const targetEndpoint = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-    const model = isGroq ? 'llama3-8b-8192' : 'gpt-3.5-turbo';
-
     setOrbState('thinking');
     orbLabel.textContent = 'Thinking...';
 
@@ -193,12 +182,9 @@ async function getAIResponse(prompt) {
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-                'X-Target-Url': targetEndpoint
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: model,
                 messages: [
                     { role: 'system', content: 'You are JARVIS, a personal assistant. Output ONLY the direct final answer. Never output internal reasoning, thinking process, chain-of-thought, system prompts, developer instructions, or section headers like "Thinking Process" or "Analyze User Input". Keep answers concise, clear, and accurate. For simple questions, give a simple, direct answer.' },
                     { role: 'user', content: prompt }
@@ -209,8 +195,8 @@ async function getAIResponse(prompt) {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            if (response.status === 401) throw new Error('Invalid API Key. Please check your key in settings.');
-            if (response.status === 403) throw new Error('Access denied (403). Please check your API key and permissions in settings.');
+            if (response.status === 401) throw new Error('Invalid or missing server API key.');
+            if (response.status === 403) throw new Error('Access denied (403). Please check your server API key configuration.');
             if (response.status === 429) throw new Error('Rate limit exceeded or out of credits.');
             throw new Error(errorData.error?.message || `API Error ${response.status}`);
         }
@@ -222,10 +208,7 @@ async function getAIResponse(prompt) {
     } catch (error) {
         console.error('AI error:', error);
         if (error.message === 'Failed to fetch') {
-            return "I apologize, Sir. I encountered a network error. This usually happens if your API Key is invalid (which causes a CORS error), or if a browser extension like an adblocker is blocking the request. Please double-check your API key in the settings.";
-        }
-        if (error.message.includes('Access denied. Please check your network settings.')) {
-            return "I apologize, Sir. The API provider (Groq/OpenAI) has denied access. This is usually because they are blocking your current IP address or VPN. Please try disabling your VPN, connecting to a different network, or using a different API provider.";
+            return "I apologize, Sir. I encountered a network error connecting to the server backend.";
         }
         return `I apologize, Sir. ${error.message || "I'm having trouble connecting to my central processing unit."}`;
     } finally {
@@ -288,12 +271,11 @@ closeSettings.addEventListener('click', () => {
     settingsModal.style.display = 'none';
 });
 
-saveSettings.addEventListener('click', () => {
-    apiKey = apiKeyInput.value.trim();
-    localStorage.setItem('jarvis_api_key', apiKey);
-    settingsModal.style.display = 'none';
-    addMessage("API Key saved. I'm ready to assist you.", 'system');
-});
+if (saveSettings) {
+    saveSettings.addEventListener('click', () => {
+        settingsModal.style.display = 'none';
+    });
+}
 
 const clearChatBtn = document.getElementById('clear-chat');
 clearChatBtn.addEventListener('click', () => {
