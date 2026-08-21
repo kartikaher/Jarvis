@@ -184,7 +184,7 @@ async function getAIResponse(prompt) {
 
     const isGroq = apiKey.startsWith('gsk_');
     const targetEndpoint = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-    const model = isGroq ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo';
+    const model = isGroq ? 'llama3-8b-8192' : 'gpt-3.5-turbo';
 
     setOrbState('thinking');
     orbLabel.textContent = 'Thinking...';
