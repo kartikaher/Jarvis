@@ -3,11 +3,20 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const https = require('https');
 const path = require('path');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+// Multer Memory Storage Configuration (Max 5MB)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
 
 // Serve frontend static files from ../frontend
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
@@ -15,6 +24,69 @@ app.use(express.static(path.join(__dirname, '..', 'frontend')));
 // Health check endpoint - Render uses this to verify the service is running
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'jarvis', timestamp: new Date().toISOString() });
+});
+
+// File Upload & Text Extraction Endpoint
+app.post('/api/upload', (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: { message: 'File size exceeds 5MB limit. Please upload a smaller file.' } });
+      }
+      return res.status(400).json({ error: { message: 'File upload error: ' + err.message } });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: { message: 'No file uploaded.' } });
+    }
+
+    const file = req.file;
+    const ext = path.extname(file.originalname).toLowerCase();
+    let extractedText = '';
+
+    try {
+      if (ext === '.txt') {
+        extractedText = file.buffer.toString('utf-8');
+      } else if (ext === '.pdf') {
+        const pdfData = await pdfParse(file.buffer);
+        extractedText = pdfData.text || '';
+      } else if (ext === '.docx') {
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        extractedText = result.value || '';
+      } else {
+        return res.status(400).json({
+          error: { message: 'Unsupported file format. Only PDF, TXT, and DOCX files are allowed.' }
+        });
+      }
+
+      extractedText = extractedText.trim();
+
+      if (!extractedText) {
+        return res.status(400).json({
+          error: { message: 'Could not extract text from the file. The document may be empty or contain non-text media.' }
+        });
+      }
+
+      // Safe character truncation limit (20,000 chars)
+      const maxLength = 20000;
+      if (extractedText.length > maxLength) {
+        extractedText = extractedText.slice(0, maxLength) + '\n\n[Document truncated due to size]';
+      }
+
+      return res.json({
+        success: true,
+        filename: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        textContent: extractedText
+      });
+    } catch (parseError) {
+      console.error('File parsing error:', parseError.message);
+      return res.status(400).json({
+        error: { message: 'Failed to process file. The document may be corrupted or password-protected.' }
+      });
+    }
+  });
 });
 
 // Proxy endpoint for AI API calls

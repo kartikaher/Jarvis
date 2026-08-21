@@ -599,3 +599,146 @@ footer {
         width: 90%;
     }
 }
+
+/* File Attachment & Preview Styling */
+.file-preview-area {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: fade-in 0.25s ease;
+}
+
+.file-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 210, 255, 0.12);
+    border: 1px solid rgba(0, 210, 255, 0.35);
+    color: var(--primary-color);
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    backdrop-filter: blur(8px);
+}
+
+.file-badge-icon {
+    display: flex;
+    align-items: center;
+}
+
+.file-badge-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.file-badge-name {
+    font-weight: 600;
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-badge-size {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+}
+
+.file-badge-remove {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.file-badge-remove:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--error);
+}
+
+/* Attached file tag inside message bubble */
+.attached-file-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    color: var(--text-color);
+    margin-bottom: 8px;
+}
+
+/* System Message Footer & Speaker Button */
+.message-content-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.message-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.message-speaker-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+}
+
+.message-speaker-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+
+.message-speaker-btn.speaking {
+    color: var(--primary-color);
+    background: rgba(0, 210, 255, 0.15);
+    animation: pulse-button 1.5s infinite;
+}
+
+/* Mic Active Recording Indicator */
+.icon-btn.recording {
+    background: rgba(239, 68, 68, 0.25) !important;
+    color: var(--error) !important;
+    border: 1px solid var(--error);
+    animation: listening-pulse 1s infinite ease-in-out !important;
+}
+
+/* Settings Toggle Checkbox */
+.setting-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: var(--text-color);
+}
+
+.toggle-checkbox {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
