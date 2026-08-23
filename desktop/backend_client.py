@@ -26,11 +26,14 @@ DEFAULT_SYSTEM_PROMPT = (
 class BackendClient:
     def __init__(self, base_url: str = None):
         self.custom_base_url = base_url
-        self.token = DESKTOP_AGENT_TOKEN
         self.device_name = f"{socket.gethostname()} (Windows)"
         self.device_id = f"win_{socket.gethostname().lower()}"
         self.is_polling = False
         self._poll_thread = None
+
+    @property
+    def token(self) -> str:
+        return os.environ.get("DESKTOP_AGENT_TOKEN") or get_setting("desktop_agent_token", "jarvis_desktop_secure_token_default").strip()
 
     def get_target_urls(self) -> list:
         """Returns list of all target backend URLs to poll and heartbeat."""
@@ -43,12 +46,13 @@ class BackendClient:
         cfg_url = get_setting("backend_url", "http://localhost:10000")
         if cfg_url:
             urls.add(cfg_url.strip().rstrip("/"))
-        remote_url = get_setting("remote_backend_url", "")
+        remote_url = get_setting("remote_backend_url", "https://jarvis-1-532t.onrender.com")
         if remote_url:
             urls.add(remote_url.strip().rstrip("/"))
-        # Always ensure localhost is included for local browser
+        # Always ensure both Render production URL and localhost are included
+        urls.add("https://jarvis-1-532t.onrender.com")
         urls.add("http://localhost:10000")
-        return list(urls)
+        return [u for u in urls if u]
 
     def _get_headers(self) -> dict:
         return {

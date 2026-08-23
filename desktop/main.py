@@ -233,16 +233,23 @@ class JarvisDesktopApp:
                 self.wake_detector.resume()
 
     def _ensure_backend_running(self):
-        """Starts the backend proxy in the background if not already running."""
-        if not backend_client.check_health():
+        """Starts the local backend proxy on port 10000 in the background if not already running."""
+        import requests
+        is_local_healthy = False
+        try:
+            r = requests.get("http://localhost:10000/health", timeout=1.5)
+            if r.status_code == 200 and r.json().get("status") == "ok":
+                is_local_healthy = True
+        except Exception:
+            is_local_healthy = False
+
+        if not is_local_healthy:
             backend_dir = os.path.join(PROJECT_ROOT, "backend")
             try:
                 node_cmd = r"C:\Program Files\nodejs\node.exe"
                 if not os.path.exists(node_cmd):
                     node_cmd = "node"
                 server_js = os.path.join(backend_dir, "server.js")
-
-
 
                 self.backend_process = subprocess.Popen(
                     f'"{node_cmd}" "{server_js}"',
@@ -254,22 +261,20 @@ class JarvisDesktopApp:
                     creationflags=0x08000000
                 )
 
-
-
-
-
-
-
                 for _ in range(12):
                     time.sleep(0.5)
-                    if backend_client.check_health():
-                        print("[JARVIS] Backend server successfully started and healthy.")
-                        return
-                print("[JARVIS] Backend launch initiated, proceeding.")
+                    try:
+                        r = requests.get("http://localhost:10000/health", timeout=1.5)
+                        if r.status_code == 200 and r.json().get("status") == "ok":
+                            print("[JARVIS] Local backend server successfully started and healthy.")
+                            return
+                    except Exception:
+                        pass
+                print("[JARVIS] Local backend launch initiated, proceeding.")
             except Exception as e:
-                print(f"[JARVIS] Could not auto-start backend server: {e}")
+                print(f"[JARVIS] Could not auto-start local backend server: {e}")
         else:
-            print("[JARVIS] Backend server is already active and healthy.")
+            print("[JARVIS] Local backend server is already active and healthy.")
 
     def start(self):
         print("[JARVIS] Initializing Desktop Agent...")

@@ -37,11 +37,11 @@ let desktopAgentState = {
   commandQueue: [] // commands waiting for agent to poll
 };
 
-// Check if agent is considered online (heartbeat received within last 12 seconds)
+// Check if agent is considered online (heartbeat received within last 20 seconds)
 function isDesktopAgentOnline() {
   if (!desktopAgentState.online || !desktopAgentState.lastSeen) return false;
   const timeSinceLastSeen = Date.now() - new Date(desktopAgentState.lastSeen).getTime();
-  return timeSinceLastSeen < 12000;
+  return timeSinceLastSeen < 20000;
 }
 
 // Queue a command for the desktop agent and wait for completion
