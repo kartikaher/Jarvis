@@ -39,6 +39,18 @@ const deleteModal = document.getElementById('delete-modal');
 const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
 const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
 
+// Memory System Elements
+const memoryToggle = document.getElementById('memory-toggle');
+const showMemoriesBtn = document.getElementById('show-memories-btn');
+const memoryModal = document.getElementById('memory-modal');
+const memoryListEl = document.getElementById('memory-list');
+const memoryEmptyEl = document.getElementById('memory-empty');
+const closeMemoryModal = document.getElementById('close-memory-modal');
+const clearAllMemoriesBtn = document.getElementById('clear-all-memories-btn');
+const clearMemoriesConfirmModal = document.getElementById('clear-memories-confirm-modal');
+const cancelClearMemories = document.getElementById('cancel-clear-memories');
+const confirmClearMemories = document.getElementById('confirm-clear-memories');
+
 // State Management
 let conversations = [];
 let activeConversationId = null;
@@ -47,6 +59,8 @@ let isUserScrolledUp = false;
 let isRecording = false;
 let currentlySpeakingMsgId = null;
 let isAutoSpeakEnabled = localStorage.getItem('jarvis_auto_speak') !== 'false'; // default true
+let isMemoryEnabled = true; // will be loaded from server
+let pendingMemoryClear = false; // flag for "forget everything" confirmation
 
 // Default System Welcome Message
 const DEFAULT_WELCOME_MSG = "Hello. I am JARVIS. How can I assist you today?";
@@ -728,6 +742,281 @@ function cleanAIResponse(text) {
     return cleaned.trim();
 }
 
+// ============================================================
+// LONG-TERM MEMORY SYSTEM
+// ============================================================
+
+// Memory API Helpers
+async function fetchMemories() {
+    try {
+        const res = await fetch('/api/memories');
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.memories || [];
+    } catch (e) {
+        console.error('Failed to fetch memories:', e);
+        return [];
+    }
+}
+
+async function createMemory(content, category = 'fact') {
+    try {
+        const res = await fetch('/api/memories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, category })
+        });
+        return await res.json();
+    } catch (e) {
+        console.error('Failed to create memory:', e);
+        return null;
+    }
+}
+
+async function deleteMemory(memId) {
+    try {
+        const res = await fetch(`/api/memories/${memId}`, { method: 'DELETE' });
+        return res.ok;
+    } catch (e) {
+        console.error('Failed to delete memory:', e);
+        return false;
+    }
+}
+
+async function deleteAllMemories() {
+    try {
+        const res = await fetch('/api/memories?confirm=true', { method: 'DELETE' });
+        return res.ok;
+    } catch (e) {
+        console.error('Failed to delete all memories:', e);
+        return false;
+    }
+}
+
+async function loadMemorySettings() {
+    try {
+        const res = await fetch('/api/memory-settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        isMemoryEnabled = data.enabled !== false;
+        if (memoryToggle) memoryToggle.checked = isMemoryEnabled;
+    } catch (e) {
+        console.error('Failed to load memory settings:', e);
+    }
+}
+
+async function updateMemorySettings(enabled) {
+    try {
+        const res = await fetch('/api/memory-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        if (res.ok) {
+            isMemoryEnabled = enabled;
+        }
+    } catch (e) {
+        console.error('Failed to update memory settings:', e);
+    }
+}
+
+// Find a memory by content similarity (for "forget that..." commands)
+async function findAndDeleteMemory(searchText) {
+    const memories = await fetchMemories();
+    if (memories.length === 0) return false;
+
+    const searchWords = new Set(searchText.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const mem of memories) {
+        const memWords = mem.content.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        let score = 0;
+        for (const w of memWords) {
+            if (searchWords.has(w) || [...searchWords].some(sw => w.includes(sw) || sw.includes(w))) {
+                score++;
+            }
+        }
+        const ratio = score / Math.max(memWords.length, 1);
+        if (ratio > bestScore && ratio >= 0.3) {
+            bestScore = ratio;
+            bestMatch = mem;
+        }
+    }
+
+    if (bestMatch) {
+        return await deleteMemory(bestMatch.id);
+    }
+    return false;
+}
+
+// Add a JARVIS response to chat without calling AI API
+function addLocalSystemMessage(text) {
+    const activeConv = getActiveConversation();
+    if (!activeConv) return;
+
+    const aiMsgId = generateId('msg');
+    const aiMsgObj = {
+        id: aiMsgId,
+        text: text,
+        sender: 'system',
+        timestamp: Date.now()
+    };
+    activeConv.messages.push(aiMsgObj);
+    activeConv.updatedAt = Date.now();
+    saveToStorage();
+
+    renderMessageDOM(text, 'system', aiMsgId);
+    setTimeout(() => scrollToBottom(false), 100);
+
+    if (isAutoSpeakEnabled) {
+        speakMessage(text, aiMsgId);
+    }
+    renderHistoryList();
+}
+
+// Handle memory-specific commands — returns true if handled, false if not a memory command
+async function handleMemoryCommand(text) {
+    const lower = text.toLowerCase().trim();
+
+    // Handle pending "forget everything" confirmation
+    if (pendingMemoryClear) {
+        pendingMemoryClear = false;
+        if (lower === 'yes' || lower.includes('yes, forget everything') || lower.includes('yes forget everything') || lower.includes('confirm')) {
+            await deleteAllMemories();
+            addLocalSystemMessage("Done, Sir. I've forgotten everything. My memory has been completely cleared.");
+            return true;
+        } else {
+            addLocalSystemMessage("Memory clear cancelled, Sir. Your memories are safe.");
+            return true;
+        }
+    }
+
+    // "Remember that..." — explicit save
+    const rememberMatch = text.match(/^remember\s+(?:that\s+|this:\s*)?(.+)/i);
+    if (rememberMatch && rememberMatch[1].trim().length > 2) {
+        const content = rememberMatch[1].trim();
+        const result = await createMemory(content, 'fact');
+        if (result && result.success) {
+            const action = result.action === 'updated' ? "updated that in my memory" : "remember that";
+            addLocalSystemMessage(`I'll ${action}, Sir.`);
+        } else {
+            addLocalSystemMessage("I apologize, Sir. I wasn't able to save that to memory.");
+        }
+        return true;
+    }
+
+    // "Forget that..." / "Forget about..." — delete matching memory
+    const forgetMatch = text.match(/^forget\s+(?:that\s+|about\s+)?(.+)/i);
+    if (forgetMatch && forgetMatch[1].trim().length > 2 && !lower.includes('forget everything')) {
+        const searchText = forgetMatch[1].trim();
+        const deleted = await findAndDeleteMemory(searchText);
+        if (deleted) {
+            addLocalSystemMessage("Done. I've forgotten that, Sir.");
+        } else {
+            addLocalSystemMessage("I don't seem to have that in my memory, Sir.");
+        }
+        return true;
+    }
+
+    // "What do you remember?" / "What do you know about me?"
+    if (lower.includes('what do you remember') || lower.includes('what do you know about me') ||
+        lower.includes('show my memories') || lower.includes('list my memories') ||
+        lower.includes('show memories') || lower.includes('what have you memorized')) {
+        const memories = await fetchMemories();
+        if (memories.length === 0) {
+            addLocalSystemMessage("I don't have any saved memories yet, Sir. I'll learn as we talk.");
+        } else {
+            let response = "Here's what I remember about you, Sir:\n\n";
+            memories.forEach(m => {
+                const icon = m.category === 'preference' ? '💡' : m.category === 'instruction' ? '📝' : '📌';
+                response += `${icon} ${m.content}\n`;
+            });
+            response += `\nTotal: ${memories.length} ${memories.length === 1 ? 'memory' : 'memories'}.`;
+            addLocalSystemMessage(response);
+        }
+        return true;
+    }
+
+    // "Forget everything" / "Clear all memories"
+    if (lower === 'forget everything' || lower === 'clear all memories' ||
+        lower === 'forget everything you remember' || lower === 'delete all memories' ||
+        lower === 'forget everything about me') {
+        const memories = await fetchMemories();
+        if (memories.length === 0) {
+            addLocalSystemMessage("I don't have any memories to clear, Sir.");
+            return true;
+        }
+        pendingMemoryClear = true;
+        addLocalSystemMessage(`Are you sure you want me to forget everything, Sir? I currently have ${memories.length} ${memories.length === 1 ? 'memory' : 'memories'} saved. Say "Yes, forget everything" to confirm, or anything else to cancel.`);
+        return true;
+    }
+
+    return false;
+}
+
+// Render memory viewer modal content
+async function renderMemoryViewer() {
+    if (!memoryListEl || !memoryEmptyEl) return;
+    memoryListEl.innerHTML = '';
+
+    const memories = await fetchMemories();
+
+    if (memories.length === 0) {
+        memoryEmptyEl.style.display = 'flex';
+        memoryListEl.style.display = 'none';
+        if (clearAllMemoriesBtn) clearAllMemoriesBtn.style.display = 'none';
+        return;
+    }
+
+    memoryEmptyEl.style.display = 'none';
+    memoryListEl.style.display = 'flex';
+    if (clearAllMemoriesBtn) clearAllMemoriesBtn.style.display = '';
+
+    // Sort by updatedAt desc
+    memories.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+
+    memories.forEach(mem => {
+        const card = document.createElement('div');
+        card.className = 'memory-card';
+        card.setAttribute('data-memory-id', mem.id);
+
+        const dateStr = formatDate(new Date(mem.updatedAt || mem.createdAt).getTime());
+
+        card.innerHTML = `
+            <div class="memory-card-header">
+                <span class="memory-card-content">${escapeHTML(mem.content)}</span>
+                <button class="memory-delete-btn" title="Delete this memory" data-id="${mem.id}">
+                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
+                </button>
+            </div>
+            <div class="memory-card-footer">
+                <span class="memory-category ${escapeHTML(mem.category || 'fact')}">${escapeHTML(mem.category || 'fact')}</span>
+                <span class="memory-date">${dateStr}</span>
+            </div>
+        `;
+
+        const delBtn = card.querySelector('.memory-delete-btn');
+        delBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const success = await deleteMemory(mem.id);
+            if (success) {
+                card.style.opacity = '0';
+                card.style.transform = 'translateX(20px)';
+                card.style.transition = 'all 0.3s ease';
+                setTimeout(() => renderMemoryViewer(), 300);
+            }
+        });
+
+        memoryListEl.appendChild(card);
+    });
+}
+
+// ============================================================
+// END MEMORY SYSTEM
+// ============================================================
+
 async function getAIResponse(prompt, fileAttachment = null) {
     setOrbState('thinking');
     if (orbLabel) orbLabel.textContent = 'Thinking...';
@@ -822,6 +1111,10 @@ async function handleUserMessage(text) {
     scrollToBottom(true);
     renderHistoryList();
 
+    // Check for memory commands (remember/forget/what do you remember)
+    const wasMemoryCommand = await handleMemoryCommand(trimmed);
+    if (wasMemoryCommand) return;
+
     // Fetch AI response
     const responseText = await getAIResponse(trimmed, currentFile);
 
@@ -865,6 +1158,9 @@ window.addEventListener('load', () => {
 
     if (synth) initJarvisVoice();
     if (userInput) userInput.focus();
+
+    // Load memory settings from server
+    loadMemorySettings();
 });
 
 // UI Event Listeners
@@ -986,5 +1282,55 @@ if (clearChatBtn) {
             }
             if (settingsModal) settingsModal.style.display = 'none';
         }
+    });
+}
+
+// ============================================================
+// MEMORY SYSTEM EVENT LISTENERS
+// ============================================================
+
+// Memory toggle (enable/disable)
+if (memoryToggle) {
+    memoryToggle.addEventListener('change', (e) => {
+        updateMemorySettings(e.target.checked);
+    });
+}
+
+// Show Memories button → open memory viewer
+if (showMemoriesBtn) {
+    showMemoriesBtn.addEventListener('click', () => {
+        if (settingsModal) settingsModal.style.display = 'none';
+        renderMemoryViewer();
+        if (memoryModal) memoryModal.style.display = 'flex';
+    });
+}
+
+// Close memory viewer modal
+if (closeMemoryModal) {
+    closeMemoryModal.addEventListener('click', () => {
+        if (memoryModal) memoryModal.style.display = 'none';
+    });
+}
+
+// Clear All Memories button → show confirmation
+if (clearAllMemoriesBtn) {
+    clearAllMemoriesBtn.addEventListener('click', () => {
+        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'flex';
+    });
+}
+
+// Cancel clear all memories
+if (cancelClearMemories) {
+    cancelClearMemories.addEventListener('click', () => {
+        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'none';
+    });
+}
+
+// Confirm clear all memories
+if (confirmClearMemories) {
+    confirmClearMemories.addEventListener('click', async () => {
+        await deleteAllMemories();
+        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'none';
+        renderMemoryViewer(); // refresh the memory list (now empty)
     });
 }

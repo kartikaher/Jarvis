@@ -80,6 +80,16 @@
                         <input type="checkbox" id="auto-speak-toggle" class="toggle-checkbox" checked>
                     </label>
                 </div>
+                <div class="setting-group">
+                    <label for="memory-toggle" class="setting-label">
+                        <span>Long-term Memory</span>
+                        <input type="checkbox" id="memory-toggle" class="toggle-checkbox" checked>
+                    </label>
+                    <p class="setting-hint">JARVIS will remember important things you tell it across conversations.</p>
+                </div>
+                <div class="setting-group">
+                    <button id="show-memories-btn" class="btn memory-btn">Show Memories</button>
+                </div>
                 <div class="modal-actions">
                     <button id="clear-chat" class="btn error">Clear Conversation</button>
                     <button id="close-settings" class="btn">Close</button>
@@ -121,6 +131,35 @@
                 <div class="modal-actions">
                     <button id="cancel-delete-btn" class="btn">Cancel</button>
                     <button id="confirm-delete-btn" class="btn error">Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Memory Viewer Modal -->
+        <div id="memory-modal" class="modal">
+            <div class="modal-content memory-modal-content">
+                <h3>Memories</h3>
+                <div id="memory-list" class="memory-list"></div>
+                <div id="memory-empty" class="memory-empty" style="display: none;">
+                    <svg viewBox="0 0 24 24" width="40" height="40"><path fill="currentColor" opacity="0.4" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16Z"/></svg>
+                    <p>No memories saved yet.</p>
+                    <span>JARVIS will automatically learn from your conversations.</span>
+                </div>
+                <div class="modal-actions">
+                    <button id="clear-all-memories-btn" class="btn error">Clear All</button>
+                    <button id="close-memory-modal" class="btn">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Clear All Memories Confirmation Modal -->
+        <div id="clear-memories-confirm-modal" class="modal">
+            <div class="modal-content text-center">
+                <h3>Clear All Memories</h3>
+                <p class="modal-description">Are you sure you want to permanently delete all memories? JARVIS will forget everything it has learned about you.</p>
+                <div class="modal-actions">
+                    <button id="cancel-clear-memories" class="btn">Cancel</button>
+                    <button id="confirm-clear-memories" class="btn error">Delete All</button>
                 </div>
             </div>
         </div>

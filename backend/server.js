@@ -3,6 +3,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const https = require('https');
 const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -21,12 +22,377 @@ const upload = multer({
 // Serve frontend static files from ../frontend
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
+// ============================================================
+// LONG-TERM MEMORY SYSTEM — File-based persistence
+// ============================================================
+
+const MEMORY_FILE = path.join(__dirname, 'data', 'memories.json');
+const MAX_MEMORIES = 100;
+
+function readMemoryFile() {
+  try {
+    if (!fs.existsSync(MEMORY_FILE)) {
+      const dir = path.dirname(MEMORY_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const initial = { memories: [], settings: { enabled: true } };
+      fs.writeFileSync(MEMORY_FILE, JSON.stringify(initial, null, 2));
+      return initial;
+    }
+    return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+  } catch (e) {
+    console.error('Memory file read error:', e.message);
+    return { memories: [], settings: { enabled: true } };
+  }
+}
+
+function writeMemoryFile(data) {
+  try {
+    const dir = path.dirname(MEMORY_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('Memory file write error:', e.message);
+  }
+}
+
+function generateMemoryId() {
+  return `mem_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+}
+
+// Sensitive data patterns — never store these
+const SENSITIVE_PATTERNS = [
+  /password\s*[:=]\s*\S+/i,
+  /\bmy password\b/i,
+  /api[_\-]?key\s*[:=]\s*\S+/i,
+  /token\s*[:=]\s*\S+/i,
+  /secret\s*[:=]\s*\S+/i,
+  /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/,
+  /\b\d{3}-\d{2}-\d{4}\b/,
+  /Bearer\s+[A-Za-z0-9\-._~+\/]+=*/i,
+  /sk-[A-Za-z0-9]{20,}/i,
+  /gsk_[A-Za-z0-9]{20,}/i,
+  /\bpin\s*[:=]\s*\d{4,}/i,
+  /\bcvv\s*[:=]\s*\d{3,4}/i,
+];
+
+function containsSensitiveData(text) {
+  return SENSITIVE_PATTERNS.some(pattern => pattern.test(text));
+}
+
+// Get relevant memories for a user message
+function getRelevantMemories(userMessage, memories, maxCount = 20) {
+  if (!memories || memories.length === 0) return [];
+  if (memories.length <= maxCount) return memories;
+
+  const words = userMessage.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  const scored = memories.map(mem => {
+    const memWords = mem.content.toLowerCase().split(/\s+/);
+    let score = 0;
+    for (const word of words) {
+      if (memWords.some(mw => mw.includes(word) || word.includes(mw))) {
+        score++;
+      }
+    }
+    // Boost recent memories
+    const ageMs = Date.now() - new Date(mem.updatedAt || mem.createdAt).getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    if (ageDays < 7) score += 2;
+    else if (ageDays < 30) score += 1;
+    return { ...mem, _score: score };
+  });
+
+  scored.sort((a, b) => b._score - a._score);
+  return scored.slice(0, maxCount).map(({ _score, ...mem }) => mem);
+}
+
+// Find existing memory that overlaps with new content in the same category
+function findConflictingMemory(memories, newContent, newCategory) {
+  const newWords = new Set(newContent.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+
+  for (const mem of memories) {
+    if (mem.category !== newCategory) continue;
+    const memWords = mem.content.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const overlap = memWords.filter(w => newWords.has(w)).length;
+    const overlapRatio = overlap / Math.max(memWords.length, 1);
+    if (overlapRatio >= 0.4) return mem;
+  }
+  return null;
+}
+
+// Make a Groq API call (used for memory detection)
+function callGroqAPI(messages, maxTokens = 200) {
+  return new Promise((resolve, reject) => {
+    const apiKey = (process.env.GROQ_API_KEY || '').trim();
+    if (!apiKey || apiKey === 'your_groq_api_key') {
+      return reject(new Error('GROQ_API_KEY not configured'));
+    }
+
+    const model = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+    const postData = JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature: 0.1
+    });
+
+    const options = {
+      hostname: 'api.groq.com',
+      path: '/openai/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.choices && data.choices[0]) {
+            resolve(data.choices[0].message?.content || '');
+          } else {
+            reject(new Error(data.error?.message || 'No response from Groq'));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Detect and save memories from a user message (async, fire-and-forget)
+async function detectAndSaveMemories(userMessage) {
+  try {
+    const data = readMemoryFile();
+    if (!data.settings.enabled) return;
+    if (containsSensitiveData(userMessage)) return;
+    if (data.memories.length >= MAX_MEMORIES) return;
+
+    const existingList = data.memories.length > 0
+      ? '\n\nEXISTING MEMORIES (avoid duplicates — if info changed, include "updateId" with the memory ID):\n' +
+        data.memories.map(m => `[${m.id}] (${m.category}) ${m.content}`).join('\n')
+      : '';
+
+    const systemPrompt = `You are a memory extraction system for a personal AI assistant named JARVIS. Analyze the user's message and extract personal facts, preferences, or instructions they explicitly stated about themselves.
+
+Rules:
+1. ONLY extract what the user explicitly states about themselves.
+2. Do NOT extract: questions, requests, greetings, commands to the AI, conversational filler, or things the user is asking about (not stating).
+3. NEVER extract sensitive data: passwords, API keys, tokens, bank details, credit cards, SSN, security credentials, secret keys, PINs.
+4. Keep each memory concise (one short sentence, starting with "User").
+5. Categorize as: "preference" (likes/dislikes/choices), "fact" (personal info, studies, work, name, age, location), or "instruction" (response style preferences, how to address them).
+6. If the user's message updates information from an existing memory, include "updateId" with that memory's ID.
+7. Return ONLY valid JSON. No markdown, no explanation, no code blocks.
+
+Format: {"memories": [{"content": "...", "category": "preference|fact|instruction"}]}
+For updates: {"memories": [{"content": "...", "category": "...", "updateId": "mem_xxx"}]}
+If nothing to save: {"memories": []}${existingList}`;
+
+    const response = await callGroqAPI([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ], 300);
+
+    // Clean response — extract JSON
+    let cleaned = response.trim();
+    cleaned = cleaned.replace(/```json\s*/gi, '').replace(/```\s*/gi, '');
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    cleaned = cleaned.replace(/<thought>[\s\S]*?<\/thought>/gi, '');
+    cleaned = cleaned.trim();
+
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return;
+
+    const result = JSON.parse(jsonMatch[0]);
+    if (!result.memories || !Array.isArray(result.memories) || result.memories.length === 0) return;
+
+    const now = new Date().toISOString();
+
+    for (const mem of result.memories) {
+      if (!mem.content || typeof mem.content !== 'string') continue;
+      if (containsSensitiveData(mem.content)) continue;
+      if (mem.content.trim().length < 3 || mem.content.length > 500) continue;
+
+      const category = ['preference', 'fact', 'instruction'].includes(mem.category) ? mem.category : 'fact';
+
+      // Check for update via AI-provided ID
+      if (mem.updateId) {
+        const existing = data.memories.find(m => m.id === mem.updateId);
+        if (existing) {
+          existing.content = mem.content.trim();
+          existing.category = category;
+          existing.updatedAt = now;
+          console.log(`Memory updated [${existing.id}]: ${mem.content}`);
+          continue;
+        }
+      }
+
+      // Server-side conflict check (fallback)
+      const conflict = findConflictingMemory(data.memories, mem.content, category);
+      if (conflict) {
+        conflict.content = mem.content.trim();
+        conflict.updatedAt = now;
+        console.log(`Memory updated (conflict) [${conflict.id}]: ${mem.content}`);
+        continue;
+      }
+
+      // Create new memory
+      if (data.memories.length < MAX_MEMORIES) {
+        const newMem = {
+          id: generateMemoryId(),
+          content: mem.content.trim(),
+          category,
+          createdAt: now,
+          updatedAt: now
+        };
+        data.memories.push(newMem);
+        console.log(`Memory created [${newMem.id}]: ${mem.content}`);
+      }
+    }
+
+    writeMemoryFile(data);
+  } catch (e) {
+    console.error('Memory detection error:', e.message);
+  }
+}
+
+// ============================================================
+// API ROUTES
+// ============================================================
+
 // Health check endpoint - Render uses this to verify the service is running
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'jarvis', timestamp: new Date().toISOString() });
 });
 
-// File Upload & Text Extraction Endpoint
+// ---- Memory CRUD Endpoints ----
+
+// Get all memories
+app.get('/api/memories', (req, res) => {
+  const data = readMemoryFile();
+  res.json({ memories: data.memories, count: data.memories.length });
+});
+
+// Create a memory
+app.post('/api/memories', (req, res) => {
+  const { content, category } = req.body;
+  if (!content || typeof content !== 'string' || content.trim().length === 0) {
+    return res.status(400).json({ error: { message: 'Memory content is required.' } });
+  }
+  if (containsSensitiveData(content)) {
+    return res.status(400).json({ error: { message: 'Cannot store sensitive information.' } });
+  }
+
+  const data = readMemoryFile();
+  if (data.memories.length >= MAX_MEMORIES) {
+    return res.status(400).json({ error: { message: `Memory limit reached (${MAX_MEMORIES}). Delete some memories first.` } });
+  }
+
+  const validCategory = ['preference', 'fact', 'instruction'].includes(category) ? category : 'fact';
+  const now = new Date().toISOString();
+
+  // Check for conflicting memory — update instead of duplicating
+  const conflict = findConflictingMemory(data.memories, content, validCategory);
+  if (conflict) {
+    conflict.content = content.trim();
+    conflict.updatedAt = now;
+    writeMemoryFile(data);
+    return res.json({ success: true, memory: conflict, action: 'updated' });
+  }
+
+  const newMemory = {
+    id: generateMemoryId(),
+    content: content.trim(),
+    category: validCategory,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  data.memories.push(newMemory);
+  writeMemoryFile(data);
+  res.json({ success: true, memory: newMemory, action: 'created' });
+});
+
+// Update a memory
+app.put('/api/memories/:id', (req, res) => {
+  const { id } = req.params;
+  const { content, category } = req.body;
+
+  const data = readMemoryFile();
+  const memory = data.memories.find(m => m.id === id);
+  if (!memory) {
+    return res.status(404).json({ error: { message: 'Memory not found.' } });
+  }
+
+  if (content) {
+    if (containsSensitiveData(content)) {
+      return res.status(400).json({ error: { message: 'Cannot store sensitive information.' } });
+    }
+    memory.content = content.trim();
+  }
+  if (category && ['preference', 'fact', 'instruction'].includes(category)) {
+    memory.category = category;
+  }
+  memory.updatedAt = new Date().toISOString();
+
+  writeMemoryFile(data);
+  res.json({ success: true, memory });
+});
+
+// Delete a single memory
+app.delete('/api/memories/:id', (req, res) => {
+  const { id } = req.params;
+  const data = readMemoryFile();
+  const index = data.memories.findIndex(m => m.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: { message: 'Memory not found.' } });
+  }
+
+  data.memories.splice(index, 1);
+  writeMemoryFile(data);
+  res.json({ success: true });
+});
+
+// Delete all memories (requires ?confirm=true)
+app.delete('/api/memories', (req, res) => {
+  if (req.query.confirm !== 'true') {
+    return res.status(400).json({ error: { message: 'Add ?confirm=true to delete all memories.' } });
+  }
+
+  const data = readMemoryFile();
+  data.memories = [];
+  writeMemoryFile(data);
+  res.json({ success: true, message: 'All memories deleted.' });
+});
+
+// ---- Memory Settings ----
+
+app.get('/api/memory-settings', (req, res) => {
+  const data = readMemoryFile();
+  res.json({ enabled: data.settings?.enabled !== false });
+});
+
+app.put('/api/memory-settings', (req, res) => {
+  const { enabled } = req.body;
+  const data = readMemoryFile();
+  if (!data.settings) data.settings = {};
+  data.settings.enabled = enabled !== false;
+  writeMemoryFile(data);
+  res.json({ success: true, enabled: data.settings.enabled });
+});
+
+// ---- File Upload & Text Extraction Endpoint (UNCHANGED) ----
+
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, async (err) => {
     if (err) {
@@ -89,7 +455,8 @@ app.post('/api/upload', (req, res) => {
   });
 });
 
-// Proxy endpoint for AI API calls
+// ---- Proxy endpoint for AI API calls (WITH MEMORY INTEGRATION) ----
+
 app.post('/api/chat', (req, res) => {
   const apiKey = (process.env.GROQ_API_KEY || '').trim();
 
@@ -98,6 +465,30 @@ app.post('/api/chat', (req, res) => {
       error: { message: 'Server GROQ_API_KEY environment variable is missing or unconfigured. Please set GROQ_API_KEY in server environment settings.' }
     });
   }
+
+  // ---- MEMORY INJECTION ----
+  const memData = readMemoryFile();
+  const memoryEnabled = memData.settings?.enabled !== false;
+  let userMessage = '';
+
+  if (req.body.messages && Array.isArray(req.body.messages)) {
+    // Extract user message for memory detection later
+    const userMsg = [...req.body.messages].reverse().find(m => m.role === 'user');
+    userMessage = userMsg?.content || '';
+
+    // Inject relevant memories into system prompt
+    if (memoryEnabled && memData.memories.length > 0) {
+      const relevant = getRelevantMemories(userMessage, memData.memories);
+      if (relevant.length > 0) {
+        const systemMsg = req.body.messages.find(m => m.role === 'system');
+        if (systemMsg) {
+          const memoryContext = relevant.map(m => `- ${m.content}`).join('\n');
+          systemMsg.content += `\n\nLONG-TERM MEMORY (important things you remember about the user — use these to personalize your responses when relevant, but do not mention having a "memory system" unless asked):\n${memoryContext}`;
+        }
+      }
+    }
+  }
+  // ---- END MEMORY INJECTION ----
 
   const targetUrl = 'https://api.groq.com/openai/v1/chat/completions';
   const selectedModel = process.env.GROQ_MODEL || req.body.model || 'openai/gpt-oss-120b';
@@ -129,9 +520,21 @@ app.post('/api/chat', (req, res) => {
   };
 
   const proxyReq = https.request(options, (proxyRes) => {
-    res.status(proxyRes.statusCode);
-    res.set('Content-Type', proxyRes.headers['content-type'] || 'application/json');
-    proxyRes.pipe(res);
+    // Buffer response so we can trigger async memory detection after sending
+    let responseBody = '';
+    proxyRes.on('data', chunk => responseBody += chunk);
+    proxyRes.on('end', () => {
+      res.status(proxyRes.statusCode);
+      res.set('Content-Type', proxyRes.headers['content-type'] || 'application/json');
+      res.send(responseBody);
+
+      // Async memory detection (fire-and-forget — does NOT block the response)
+      if (memoryEnabled && userMessage && userMessage.length > 3) {
+        detectAndSaveMemories(userMessage).catch(err =>
+          console.error('Async memory detection error:', err.message)
+        );
+      }
+    });
   });
 
   proxyReq.on('error', (e) => {
