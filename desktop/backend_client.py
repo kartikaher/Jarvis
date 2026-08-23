@@ -25,7 +25,8 @@ DEFAULT_SYSTEM_PROMPT = (
 
 class BackendClient:
     def __init__(self, base_url: str = None):
-        self.base_url = base_url or get_setting("backend_url", "http://localhost:10000")
+        self.base_url = (base_url or os.environ.get("JARVIS_BACKEND_URL") or get_setting("backend_url", "http://localhost:10000")).rstrip("/")
+
         self.token = DESKTOP_AGENT_TOKEN
         self.device_name = f"{socket.gethostname()} (Windows)"
         self.device_id = f"win_{socket.gethostname().lower()}"
