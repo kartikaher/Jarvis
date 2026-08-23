@@ -23,6 +23,63 @@ const upload = multer({
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 // ============================================================
+// LOCAL WINDOWS DESKTOP AGENT BRIDGE & SECURITY
+// ============================================================
+
+const DESKTOP_AGENT_TOKEN = (process.env.DESKTOP_AGENT_TOKEN || 'jarvis_desktop_secure_token_default').trim();
+
+let desktopAgentState = {
+  online: false,
+  deviceId: null,
+  deviceName: 'Local Windows PC',
+  lastSeen: null,
+  pendingCommands: new Map(), // requestId -> { command, resolve, timeout }
+  commandQueue: [] // commands waiting for agent to poll
+};
+
+// Check if agent is considered online (heartbeat received within last 12 seconds)
+function isDesktopAgentOnline() {
+  if (!desktopAgentState.online || !desktopAgentState.lastSeen) return false;
+  const timeSinceLastSeen = Date.now() - new Date(desktopAgentState.lastSeen).getTime();
+  return timeSinceLastSeen < 12000;
+}
+
+// Queue a command for the desktop agent and wait for completion
+function dispatchDesktopCommand(action, target = '', params = {}, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    if (!isDesktopAgentOnline()) {
+      return resolve({
+        success: false,
+        error: 'DESKTOP_AGENT_OFFLINE',
+        message: 'Sir, the desktop agent is currently offline.'
+      });
+    }
+
+    const requestId = `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const commandPayload = {
+      requestId,
+      action,
+      target,
+      params,
+      timestamp: new Date().toISOString()
+    };
+
+    const timer = setTimeout(() => {
+      desktopAgentState.pendingCommands.delete(requestId);
+      resolve({
+        success: false,
+        error: 'TIMEOUT',
+        message: 'Sir, the desktop agent did not respond in time.'
+      });
+    }, timeoutMs);
+
+    desktopAgentState.pendingCommands.set(requestId, { resolve, timer });
+    desktopAgentState.commandQueue.push(commandPayload);
+  });
+}
+
+
+// ============================================================
 // LONG-TERM MEMORY SYSTEM — File-based persistence
 // ============================================================
 
@@ -236,10 +293,94 @@ Rules:
 // API ROUTES
 // ============================================================
 
+// ============================================================
+// DESKTOP AGENT API ENDPOINTS
+// ============================================================
+
+// Middleware to authenticate local desktop agent requests
+function authenticateDesktopAgent(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : req.headers['x-agent-token'] || req.body?.token;
+  if (!token || token !== DESKTOP_AGENT_TOKEN) {
+    return res.status(401).json({ error: { message: 'Unauthorized: Invalid Desktop Agent authentication token.' } });
+  }
+  next();
+}
+
+// Public: Get Desktop Agent connection status for Frontend UI
+app.get('/api/desktop/status', (req, res) => {
+  const online = isDesktopAgentOnline();
+  res.json({
+    online,
+    deviceName: desktopAgentState.deviceName,
+    lastSeen: desktopAgentState.lastSeen
+  });
+});
+
+// Execute a desktop command (dispatched from Frontend or internal AI)
+app.post('/api/desktop/command', async (req, res) => {
+  const { action, target, params } = req.body;
+  if (!action) {
+    return res.status(400).json({ error: { message: 'Action is required.' } });
+  }
+
+  const result = await dispatchDesktopCommand(action, target, params);
+  res.json(result);
+});
+
+// Desktop Agent Polling & Heartbeat (Used by Local Windows Agent)
+app.post('/api/desktop/agent/poll', authenticateDesktopAgent, (req, res) => {
+  const { deviceId, deviceName } = req.body;
+  desktopAgentState.online = true;
+  desktopAgentState.deviceId = deviceId || desktopAgentState.deviceId;
+  desktopAgentState.deviceName = deviceName || desktopAgentState.deviceName;
+  desktopAgentState.lastSeen = new Date().toISOString();
+
+  // Return any pending commands in the queue
+  const commands = [...desktopAgentState.commandQueue];
+  desktopAgentState.commandQueue = [];
+
+  res.json({
+    status: 'ok',
+    commands,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Desktop Agent Report Execution Result (Used by Local Windows Agent)
+app.post('/api/desktop/agent/report', authenticateDesktopAgent, (req, res) => {
+  const { requestId, success, message, result, error } = req.body;
+  if (!requestId) {
+    return res.status(400).json({ error: { message: 'requestId is required.' } });
+  }
+
+  desktopAgentState.lastSeen = new Date().toISOString();
+
+  const pending = desktopAgentState.pendingCommands.get(requestId);
+  if (pending) {
+    clearTimeout(pending.timer);
+    desktopAgentState.pendingCommands.delete(requestId);
+    pending.resolve({
+      success: success !== false,
+      message: message || (success ? 'Action executed successfully.' : 'Action failed.'),
+      result: result || null,
+      error: error || null
+    });
+  }
+
+  res.json({ status: 'received' });
+});
+
 // Health check endpoint - Render uses this to verify the service is running
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'jarvis', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: 'jarvis',
+    desktopAgentOnline: isDesktopAgentOnline(),
+    timestamp: new Date().toISOString()
+  });
 });
+
 
 // ---- Memory CRUD Endpoints ----
 

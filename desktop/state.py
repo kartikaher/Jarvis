@@ -165,6 +165,28 @@ class AssistantStateManager:
             if recipient and msg_content and not recipient.startswith("email"):
                 return action_executor.prepare_whatsapp_message(recipient, msg_content)
 
+        # --- Quick Conversational Direct Responses (Instant Local Execution) ---
+        if any(phrase in text_clean for phrase in ["who are you", "what is your name", "who created you", "who made you", "introduce yourself"]):
+            return {"success": True, "message": "I am JARVIS, your personal Windows AI assistant. I am fully at your service, sir."}
+
+        if any(phrase in text_clean for phrase in ["how are you", "how are you doing", "how are things", "how's it going"]):
+            return {"success": True, "message": "I am operating at peak efficiency and ready for your commands, sir."}
+
+        if any(phrase in text_clean for phrase in ["what can you do", "what are your features", "help me", "capabilities"]):
+            return {"success": True, "message": "I can launch apps, search Google and YouTube, monitor your battery and system health, lock your computer, and answer your questions."}
+
+        if any(phrase in text_clean for phrase in ["tell me a joke", "make me laugh", "say a joke"]):
+            return {"success": True, "message": "Why do programmers prefer dark mode? Because light attracts bugs, sir."}
+
+        if any(phrase in text_clean for phrase in ["thank you", "thanks jarvis", "thanks"]):
+            return {"success": True, "message": "Always a pleasure to assist, sir."}
+
+        if any(phrase in text_clean for phrase in ["good morning"]):
+            return {"success": True, "message": "Good morning, sir. All systems are operational."}
+
+        if any(phrase in text_clean for phrase in ["good evening", "good afternoon"]):
+            return {"success": True, "message": "Good day, sir. How may I be of assistance?"}
+
         # --- Open URL / Websites (Allowlist) ---
         if "youtube" in text_clean and any(w in text_clean for w in ["open", "launch", "start", "go to"]):
             return action_executor.open_url("https://www.youtube.com")
@@ -192,6 +214,7 @@ class AssistantStateManager:
                 return action_executor.open_folder(folder_name)
 
         return None
+
 
 # Global state manager instance
 state_manager = AssistantStateManager()

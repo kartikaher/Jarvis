@@ -110,11 +110,15 @@ class JarvisTray:
         )
 
     def run(self):
-        image = create_jarvis_icon()
-        self.icon = pystray.Icon("JARVIS", image, "JARVIS Desktop Voice Assistant", menu=self._build_menu())
-        self.icon.run()
+        try:
+            image = create_jarvis_icon()
+            self.icon = pystray.Icon("JARVIS", image, "JARVIS Desktop Voice Assistant", menu=self._build_menu())
+            self.icon.run()
+        except Exception as e:
+            print(f"[JARVIS] Tray icon notice: {e}")
 
     def run_detached(self):
+
         """Runs tray icon in a separate thread."""
         t = threading.Thread(target=self.run, daemon=True)
         t.start()

@@ -76,6 +76,54 @@ header {
     box-shadow: 0 0 10px var(--success);
 }
 
+.desktop-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #10b981;
+    margin-left: 4px;
+    transition: all 0.3s ease;
+}
+
+.desktop-status-pill .pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #10b981;
+    box-shadow: 0 0 6px #10b981;
+}
+
+.desktop-status-pill.offline {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.desktop-status-pill.offline .pill-dot {
+    background-color: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+}
+
+.voice-toggle-btn {
+    background: rgba(0, 210, 255, 0.08) !important;
+    border: 1px solid rgba(0, 210, 255, 0.25) !important;
+    color: var(--primary-color) !important;
+}
+
+.voice-toggle-btn.active {
+    background: linear-gradient(135deg, rgba(0, 210, 255, 0.2), rgba(127, 0, 255, 0.2)) !important;
+    border-color: var(--primary-color) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 12px rgba(0, 210, 255, 0.3);
+}
+
+
 .icon-btn {
     background: transparent;
     border: none;

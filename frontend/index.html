@@ -15,9 +15,17 @@
         <header>
             <div class="logo">
                 <span class="logo-text">JARVIS</span>
-                <span class="status-indicator" id="status-dot"></span>
+                <span class="status-indicator" id="status-dot" title="JARVIS Brain Online"></span>
+                <div class="desktop-status-pill offline" id="desktop-agent-pill" title="Local Windows Agent Status">
+                    <span class="pill-dot" id="desktop-agent-dot"></span>
+                    <span class="pill-text" id="desktop-agent-text">Desktop Offline</span>
+                </div>
             </div>
             <div class="header-actions">
+                <button id="enable-voice-btn" class="header-btn voice-toggle-btn" title="Enable continuous 'Hey JARVIS' voice listening">
+                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/></svg>
+                    <span id="enable-voice-text">Enable Voice</span>
+                </button>
                 <button id="new-chat-btn" class="header-btn primary-subtle" title="Start a new chat">
                     <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
                     <span>New Chat</span>
@@ -31,6 +39,7 @@
                 </button>
             </div>
         </header>
+
 
         <main>
             <div class="orb-container">

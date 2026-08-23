@@ -216,6 +216,45 @@ class SafeActionExecutor:
         webbrowser.open(url)
         return {"success": True, "message": f"WhatsApp opened with your message to {recipient}."}
 
+    def close_app(self, app_key: str) -> dict:
+        """Closes an approved application gracefully."""
+        app_key_clean = app_key.lower().strip()
+        proc_map = {
+            "chrome": "chrome.exe",
+            "google chrome": "chrome.exe",
+            "notepad": "notepad.exe",
+            "calculator": "CalculatorApp.exe",
+            "calc": "CalculatorApp.exe",
+            "vscode": "Code.exe",
+            "vs code": "Code.exe",
+            "visual studio code": "Code.exe",
+            "spotify": "Spotify.exe",
+            "edge": "msedge.exe",
+            "microsoft edge": "msedge.exe",
+        }
+        proc = proc_map.get(app_key_clean)
+        if not proc:
+            for k, v in proc_map.items():
+                if k in app_key_clean:
+                    proc = v
+                    break
+        if not proc:
+            return {"success": False, "message": f"Cannot close unlisted application '{app_key}'."}
+
+        try:
+            subprocess.run(["taskkill", "/f", "/im", proc], capture_output=True)
+            return {"success": True, "message": f"Closed {app_key}."}
+        except Exception as e:
+            return {"success": False, "message": f"Failed to close {app_key}: {e}"}
+
+    def show_desktop(self) -> dict:
+        """Toggles minimizing all windows to show the Windows desktop."""
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-Command", "(New-Object -ComObject Shell.Application).ToggleDesktop()"], capture_output=True)
+            return {"success": True, "message": "Showing desktop."}
+        except Exception as e:
+            return {"success": False, "message": f"Could not toggle desktop: {e}"}
+
     def execute_confirmed_shutdown(self) -> dict:
         """Initiates safe system shutdown after confirmation."""
         os.system("shutdown /s /t 30")
@@ -230,5 +269,58 @@ class SafeActionExecutor:
         """Cancels current pending action or speech."""
         return {"success": True, "message": "Action cancelled."}
 
+    def execute_structured_action(self, action_name: str, target: str = "", params: dict = None) -> dict:
+        """
+        Validates and executes structured action requests from the JARVIS central brain.
+        Enforces strict security allowlists — rejects any arbitrary or unauthorized execution.
+        """
+        action = (action_name or "").upper().strip()
+        target = (target or "").strip()
+        params = params or {}
+
+        print(f"[JARVIS] Desktop action requested: {action} (Target: '{target}')")
+
+        if action in ["OPEN_APPLICATION", "OPEN_APP"]:
+            res = self.open_app(target or params.get("app", ""))
+        elif action in ["CLOSE_APPLICATION", "CLOSE_APP"]:
+            res = self.close_app(target or params.get("app", ""))
+        elif action in ["OPEN_URL", "OPEN_WEBSITE"]:
+            url = target or params.get("url", "")
+            # If target is a friendly key like 'youtube', map from approved list
+            if url.lower() in APPROVED_URLS:
+                url = APPROVED_URLS[url.lower()]
+            res = self.open_url(url)
+        elif action in ["OPEN_FOLDER", "OPEN_DIRECTORY"]:
+            res = self.open_folder(target or params.get("folder", ""))
+        elif action == "SHOW_DESKTOP":
+            res = self.show_desktop()
+        elif action == "LOCK_PC":
+            res = self.lock_workstation()
+        elif action in ["BATTERY_STATUS", "GET_BATTERY"]:
+            res = self.get_battery_status()
+        elif action in ["SYSTEM_INFO", "SYSTEM_STATUS"]:
+            res = self.get_system_status()
+        elif action in ["TIME_CHECK", "GET_TIME"]:
+            res = self.get_current_time()
+        elif action == "GOOGLE_SEARCH":
+            res = self.search_google(target or params.get("query", ""))
+        elif action == "YOUTUBE_SEARCH":
+            res = self.search_youtube(target or params.get("query", ""))
+        elif action == "CONFIRMED_SHUTDOWN":
+            res = self.execute_confirmed_shutdown()
+        elif action == "CONFIRMED_RESTART":
+            res = self.execute_confirmed_restart()
+        else:
+            print(f"[JARVIS] Desktop action rejected: Unknown or unauthorized action '{action}'")
+            return {"success": False, "message": f"Action '{action}' is not authorized or allowlisted."}
+
+        if res.get("success"):
+            print(f"[JARVIS] Desktop action validated & executed: {res.get('message')}")
+        else:
+            print(f"[JARVIS] Desktop action execution error: {res.get('message')}")
+
+        return res
+
 # Global singleton
 action_executor = SafeActionExecutor()
+

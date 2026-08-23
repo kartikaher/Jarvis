@@ -470,125 +470,549 @@ function renderHistoryList() {
     });
 }
 
-// Speech Recognition & Synthesis Setup
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
+// ============================================================
+// DESKTOP AGENT STATUS & COMMAND DISPATCHER
+// ============================================================
 
-if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.lang = 'en-US';
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+let isDesktopAgentOnline = false;
+const desktopAgentPill = document.getElementById('desktop-agent-pill');
+const desktopAgentDot = document.getElementById('desktop-agent-dot');
+const desktopAgentText = document.getElementById('desktop-agent-text');
+const enableVoiceBtn = document.getElementById('enable-voice-btn');
+const enableVoiceText = document.getElementById('enable-voice-text');
 
-    recognition.onstart = () => {
-        isRecording = true;
-        setOrbState('listening');
-        if (orbLabel) orbLabel.textContent = 'Listening...';
-        if (voiceBtn) {
-            voiceBtn.classList.add('recording');
-            voiceBtn.title = 'Click to stop listening';
+async function pollDesktopAgentStatus() {
+    try {
+        const res = await fetch('/api/desktop/status');
+        if (res.ok) {
+            const data = await res.json();
+            isDesktopAgentOnline = data.online === true;
+            if (desktopAgentPill) {
+                if (isDesktopAgentOnline) {
+                    desktopAgentPill.classList.remove('offline');
+                    if (desktopAgentText) desktopAgentText.textContent = 'Desktop Online';
+                    if (desktopAgentPill) desktopAgentPill.title = `Connected to ${data.deviceName || 'Local Windows PC'}`;
+                } else {
+                    desktopAgentPill.classList.add('offline');
+                    if (desktopAgentText) desktopAgentText.textContent = 'Desktop Offline';
+                    if (desktopAgentPill) desktopAgentPill.title = 'Local Windows Agent Offline';
+                }
+            }
         }
-    };
-
-    recognition.onresult = (event) => {
-        let transcript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+    } catch (e) {
+        isDesktopAgentOnline = false;
+        if (desktopAgentPill) {
+            desktopAgentPill.classList.add('offline');
+            if (desktopAgentText) desktopAgentText.textContent = 'Desktop Offline';
         }
-        if (userInput) {
-            userInput.value = transcript;
-            userInput.focus();
-        }
-    };
-
-    recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        isRecording = false;
-        setOrbState('idle');
-        if (orbLabel) orbLabel.textContent = 'Tap to Speak';
-        if (voiceBtn) {
-            voiceBtn.classList.remove('recording');
-            voiceBtn.title = 'Speech to text input';
-        }
-        if (event.error === 'not-allowed') {
-            alert('Microphone permission was denied. Please allow microphone access in your browser settings.');
-        }
-    };
-
-    recognition.onend = () => {
-        isRecording = false;
-        setOrbState('idle');
-        if (orbLabel) orbLabel.textContent = 'Tap to Speak';
-        if (voiceBtn) {
-            voiceBtn.classList.remove('recording');
-            voiceBtn.title = 'Speech to text input';
-        }
-    };
+    }
 }
 
-function toggleVoiceInput() {
-    if (!recognition) {
-        alert('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+// Poll desktop agent status every 3.5 seconds
+setInterval(pollDesktopAgentStatus, 3500);
+
+async function executeDesktopAction(action, target = '', params = {}) {
+    console.log(`[JARVIS] Desktop action requested: ${action} (${target})`);
+    try {
+        const res = await fetch('/api/desktop/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, target, params })
+        });
+        const data = await res.json();
+        if (data.success) {
+            console.log(`[JARVIS] Desktop action executed: ${data.message}`);
+        } else {
+            console.warn(`[JARVIS] Desktop action returned: ${data.message || data.error}`);
+        }
+        return data;
+    } catch (e) {
+        console.error('[JARVIS] Desktop action fetch error:', e);
+        return {
+            success: false,
+            error: 'NETWORK_ERROR',
+            message: 'Sir, I could not establish a connection with the desktop bridge.'
+        };
+    }
+}
+
+// Fast Matcher for standard desktop actions
+function matchDesktopAction(rawText) {
+    const text = rawText.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+
+    // 1. Applications
+    if (/^(open|launch|start)\s+(google\s+chrome|chrome)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'chrome', speech: 'Opening Chrome.' };
+    if (/^(open|launch|start)\s+(vs\s*code|vscode|code|visual\s+studio\s+code)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'vscode', speech: 'Opening VS Code.' };
+    if (/^(open|launch|start)\s+(calculator|calc)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'calc', speech: 'Opening Calculator.' };
+    if (/^(open|launch|start)\s+(notepad|note\s*pad)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'notepad', speech: 'Opening Notepad.' };
+    if (/^(open|launch|start)\s+(file\s*explorer|explorer|files|my\s+files)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'explorer', speech: 'Opening File Explorer.' };
+    if (/^(open|launch|start)\s+(spotify)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'spotify', speech: 'Opening Spotify.' };
+    if (/^(open|launch|start)\s+(task\s*manager)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'task manager', speech: 'Opening Task Manager.' };
+    if (/^(open|launch|start)\s+(windows\s+settings|settings)$/i.test(text)) return { action: 'OPEN_APPLICATION', target: 'settings', speech: 'Opening Settings.' };
+
+    // 2. Websites & URLs
+    if (/^(open|launch|go\s+to)\s+youtube$/i.test(text)) return { action: 'OPEN_URL', target: 'youtube', speech: 'Opening YouTube.' };
+    if (/^(open|launch|go\s+to)\s+google$/i.test(text)) return { action: 'OPEN_URL', target: 'google', speech: 'Opening Google.' };
+    if (/^(open|launch|go\s+to)\s+github$/i.test(text)) return { action: 'OPEN_URL', target: 'github', speech: 'Opening GitHub.' };
+    if (/^(open|launch|go\s+to)\s+gmail$/i.test(text)) return { action: 'OPEN_URL', target: 'gmail', speech: 'Opening Gmail.' };
+    if (/^(open|launch|go\s+to)\s+chatgpt$/i.test(text)) return { action: 'OPEN_URL', target: 'chatgpt', speech: 'Opening ChatGPT.' };
+
+    // 3. User Folders
+    if (/^(open|show)\s+(downloads|downloads\s+folder)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'downloads', speech: 'Opening Downloads.' };
+    if (/^(open|show)\s+(documents|documents\s+folder|my\s+documents)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'documents', speech: 'Opening Documents.' };
+    if (/^(open|show)\s+(desktop\s+folder)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'desktop', speech: 'Opening Desktop folder.' };
+    if (/^(open|show)\s+(pictures|pictures\s+folder)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'pictures', speech: 'Opening Pictures.' };
+    if (/^(open|show)\s+(music|music\s+folder)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'music', speech: 'Opening Music.' };
+    if (/^(open|show)\s+(videos|videos\s+folder)$/i.test(text)) return { action: 'OPEN_FOLDER', target: 'videos', speech: 'Opening Videos.' };
+
+    // 4. Windows Desktop & Workstation
+    if (/^(show\s+desktop|minimize\s+all|go\s+to\s+desktop)$/i.test(text)) return { action: 'SHOW_DESKTOP', speech: 'Showing desktop.' };
+    if (/^(lock\s+(my\s+)?(pc|computer|laptop|workstation|windows))$/i.test(text)) return { action: 'LOCK_PC', speech: 'Locking your computer.' };
+
+    // 5. System Status & Battery
+    if (/^(battery\s+status|check\s+battery|battery\s+percentage|how\s+much\s+battery)$/i.test(text)) return { action: 'BATTERY_STATUS' };
+    if (/^(system\s+status|system\s+check|pc\s+status)$/i.test(text)) return { action: 'SYSTEM_INFO' };
+
+    // 6. Close Applications
+    if (/^(close|quit|kill)\s+(google\s+chrome|chrome)$/i.test(text)) return { action: 'CLOSE_APPLICATION', target: 'chrome', speech: 'Closing Chrome.' };
+    if (/^(close|quit|kill)\s+(notepad)$/i.test(text)) return { action: 'CLOSE_APPLICATION', target: 'notepad', speech: 'Closing Notepad.' };
+    if (/^(close|quit|kill)\s+(calculator|calc)$/i.test(text)) return { action: 'CLOSE_APPLICATION', target: 'calculator', speech: 'Closing Calculator.' };
+    if (/^(close|quit|kill)\s+(vs\s*code|vscode|code)$/i.test(text)) return { action: 'CLOSE_APPLICATION', target: 'vscode', speech: 'Closing VS Code.' };
+
+    // 7. Dangerous Actions Requiring Confirmation
+    if (/^(shut\s*down|shutdown|turn\s+off)\s+(my\s+)?(laptop|pc|computer|system)$/i.test(text)) {
+        return {
+            action: 'PROMPT_SHUTDOWN',
+            speech: 'Sir, shutting down will close your current session. Do you want me to continue?'
+        };
+    }
+    if (/^(restart|reboot)\s+(my\s+)?(laptop|pc|computer|system)$/i.test(text)) {
+        return {
+            action: 'PROMPT_RESTART',
+            speech: 'Sir, restarting will close all running applications. Do you want me to proceed?'
+        };
+    }
+
+    return null;
+}
+
+// ============================================================
+// CONTINUOUS IRON-MAN VOICE & WAKE WORD ENGINE
+// ============================================================
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let wakeRecognition = null;
+let commandRecognition = null;
+let manualRecognition = null;
+
+let isContinuousVoiceEnabled = localStorage.getItem('jarvis_continuous_voice') === 'true';
+let voiceState = 'STANDBY'; // 'STANDBY' | 'LISTENING' | 'PROCESSING' | 'SPEAKING' | 'ERROR'
+let isSpeakingTTS = false;
+let pendingActionConfirmation = null; // 'SHUTDOWN' | 'RESTART'
+let wakeWordRestartTimer = null;
+
+function setOrbState(state) {
+    if (!orb) return;
+    orb.classList.remove('listening', 'thinking', 'speaking', 'error');
+    if (state === 'listening') orb.classList.add('listening');
+    if (state === 'thinking' || state === 'processing') orb.classList.add('thinking');
+    if (state === 'speaking') orb.classList.add('thinking');
+    if (state === 'error') orb.classList.add('error');
+}
+
+function updateVoiceState(state, customLabel = null) {
+    voiceState = state;
+    if (state === 'STANDBY') {
+        setOrbState('idle');
+        if (orbLabel) orbLabel.textContent = customLabel || (isContinuousVoiceEnabled ? 'Listening for Hey JARVIS' : 'Tap to Speak');
+    } else if (state === 'LISTENING') {
+        setOrbState('listening');
+        if (orbLabel) orbLabel.textContent = customLabel || 'Listening...';
+    } else if (state === 'PROCESSING') {
+        setOrbState('thinking');
+        if (orbLabel) orbLabel.textContent = customLabel || 'Thinking...';
+    } else if (state === 'SPEAKING') {
+        setOrbState('speaking');
+        if (orbLabel) orbLabel.textContent = customLabel || 'Speaking...';
+    } else if (state === 'ERROR') {
+        setOrbState('error');
+        if (orbLabel) orbLabel.textContent = customLabel || 'Voice system unavailable';
+    }
+}
+
+function normalizeWakeWord(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '').trim();
+}
+
+function isWakeWordDetected(normalizedText) {
+    const wakeVariants = [
+        'hey jarvis', 'jarvis', 'hi jarvis', 'ok jarvis', 'okay jarvis',
+        'hey jarvis open', 'hey jarvis what', 'hey jarvis explain'
+    ];
+    return wakeVariants.some(w => normalizedText.includes(w));
+}
+
+function extractInlineCommand(normalizedText) {
+    let cleaned = normalizedText;
+    const prefixes = ['hey jarvis', 'hi jarvis', 'ok jarvis', 'okay jarvis', 'jarvis'];
+    for (const p of prefixes) {
+        if (cleaned.startsWith(p)) {
+            cleaned = cleaned.substring(p.length).trim();
+            break;
+        } else if (cleaned.includes(p)) {
+            cleaned = cleaned.split(p)[1].trim();
+            break;
+        }
+    }
+    cleaned = cleaned.replace(/^(please|can you|could you|would you)\s*/i, '').trim();
+    return cleaned;
+}
+
+function initializeVoice() {
+    if (!SpeechRecognition) {
+        console.warn('[JARVIS] Web Speech API not supported in this browser.');
+        if (enableVoiceBtn) {
+            enableVoiceBtn.style.display = 'none';
+        }
         return;
     }
 
-    if (isRecording) {
-        recognition.stop();
-    } else {
-        try {
-            recognition.start();
-        } catch (e) {
-            console.error('Failed to start speech recognition:', e);
-            recognition.stop();
-        }
+    updateVoiceToggleUI();
+
+    if (isContinuousVoiceEnabled) {
+        console.log('[JARVIS] Voice initialized with continuous mode.');
+        startWakeWordListener();
     }
 }
 
+function updateVoiceToggleUI() {
+    if (!enableVoiceBtn) return;
+    if (isContinuousVoiceEnabled) {
+        enableVoiceBtn.classList.add('active');
+        if (enableVoiceText) enableVoiceText.textContent = 'Voice Active';
+        enableVoiceBtn.title = "Click to disable continuous 'Hey JARVIS' listening";
+    } else {
+        enableVoiceBtn.classList.remove('active');
+        if (enableVoiceText) enableVoiceText.textContent = 'Enable Voice';
+        enableVoiceBtn.title = "Click to enable continuous 'Hey JARVIS' voice listening";
+    }
+}
+
+function toggleContinuousVoice() {
+    if (!SpeechRecognition) {
+        alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+        return;
+    }
+
+    isContinuousVoiceEnabled = !isContinuousVoiceEnabled;
+    localStorage.setItem('jarvis_continuous_voice', isContinuousVoiceEnabled);
+    updateVoiceToggleUI();
+
+    if (isContinuousVoiceEnabled) {
+        console.log('[JARVIS] Continuous voice listening enabled.');
+        startWakeWordListener();
+    } else {
+        console.log('[JARVIS] Continuous voice listening disabled.');
+        cleanupVoice();
+    }
+}
+
+function startWakeWordListener() {
+    if (!SpeechRecognition || !isContinuousVoiceEnabled || isSpeakingTTS) return;
+
+    // Prevent duplicate listeners
+    stopWakeWordListener();
+    stopCommandListener();
+
+    try {
+        wakeRecognition = new SpeechRecognition();
+        wakeRecognition.continuous = true;
+        wakeRecognition.interimResults = true;
+        wakeRecognition.lang = 'en-US';
+        wakeRecognition.maxAlternatives = 1;
+
+        wakeRecognition.onstart = () => {
+            console.log('[JARVIS] Wake listener started - Waiting for Hey JARVIS');
+            updateVoiceState('STANDBY', 'Listening for Hey JARVIS');
+        };
+
+        wakeRecognition.onresult = (event) => {
+            if (isSpeakingTTS) return;
+
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+
+            const normalized = normalizeWakeWord(transcript);
+            if (isWakeWordDetected(normalized)) {
+                console.log(`[JARVIS] Wake word detected in: "${transcript}"`);
+                stopWakeWordListener();
+
+                const inlineCmd = extractInlineCommand(normalized);
+                if (inlineCmd && inlineCmd.length > 2) {
+                    // Inline single-shot command: "Hey JARVIS open Calculator"
+                    console.log(`[JARVIS] Direct inline command: "${inlineCmd}"`);
+                    handleUserMessage(inlineCmd, { fromVoice: true });
+                } else {
+                    // Two-step wake: "Hey JARVIS" -> "Yes, Sir." -> Listen for command
+                    updateVoiceState('SPEAKING', 'Speaking...');
+                    speakMessage("Yes, Sir.", null, () => {
+                        startCommandListener();
+                    });
+                }
+            }
+        };
+
+        wakeRecognition.onerror = (event) => {
+            if (event.error === 'not-allowed') {
+                console.error('[JARVIS] Microphone permission denied.');
+                isContinuousVoiceEnabled = false;
+                localStorage.setItem('jarvis_continuous_voice', false);
+                updateVoiceToggleUI();
+                updateVoiceState('ERROR', 'Microphone permission denied');
+                return;
+            }
+            // Auto-restart quietly on no-speech or network glitches
+            if (isContinuousVoiceEnabled && !isSpeakingTTS) {
+                clearTimeout(wakeWordRestartTimer);
+                wakeWordRestartTimer = setTimeout(() => {
+                    if (isContinuousVoiceEnabled && !isSpeakingTTS && voiceState === 'STANDBY') {
+                        startWakeWordListener();
+                    }
+                }, 800);
+            }
+        };
+
+        wakeRecognition.onend = () => {
+            wakeRecognition = null;
+            if (isContinuousVoiceEnabled && !isSpeakingTTS && (voiceState === 'STANDBY' || voiceState === 'IDLE')) {
+                clearTimeout(wakeWordRestartTimer);
+                wakeWordRestartTimer = setTimeout(() => {
+                    if (isContinuousVoiceEnabled && !isSpeakingTTS && voiceState === 'STANDBY') {
+                        startWakeWordListener();
+                    }
+                }, 300);
+            }
+        };
+
+        wakeRecognition.start();
+    } catch (e) {
+        console.warn('[JARVIS] Wake word start error:', e);
+    }
+}
+
+function stopWakeWordListener() {
+    clearTimeout(wakeWordRestartTimer);
+    if (wakeRecognition) {
+        try {
+            wakeRecognition.onend = null;
+            wakeRecognition.onerror = null;
+            wakeRecognition.abort();
+        } catch (e) {}
+        wakeRecognition = null;
+    }
+}
+
+function startCommandListener() {
+    if (!SpeechRecognition || isSpeakingTTS) return;
+
+    stopWakeWordListener();
+    stopCommandListener();
+
+    try {
+        commandRecognition = new SpeechRecognition();
+        commandRecognition.continuous = false;
+        commandRecognition.interimResults = false;
+        commandRecognition.lang = 'en-US';
+        commandRecognition.maxAlternatives = 1;
+
+        updateVoiceState('LISTENING', 'Listening...');
+        console.log('[JARVIS] Command listening started.');
+
+        commandRecognition.onresult = (event) => {
+            const commandText = event.results[0][0].transcript.trim();
+            console.log(`[JARVIS] Command received: "${commandText}"`);
+            stopCommandListener();
+            handleUserMessage(commandText, { fromVoice: true });
+        };
+
+        commandRecognition.onerror = (event) => {
+            console.warn('[JARVIS] Command listening error:', event.error);
+            stopCommandListener();
+            updateVoiceState('STANDBY');
+            if (isContinuousVoiceEnabled) {
+                setTimeout(startWakeWordListener, 400);
+            }
+        };
+
+        commandRecognition.onend = () => {
+            commandRecognition = null;
+            if (voiceState === 'LISTENING') {
+                updateVoiceState('STANDBY');
+                if (isContinuousVoiceEnabled && !isSpeakingTTS) {
+                    setTimeout(startWakeWordListener, 300);
+                }
+            }
+        };
+
+        commandRecognition.start();
+    } catch (e) {
+        console.warn('[JARVIS] Command start error:', e);
+        updateVoiceState('STANDBY');
+        if (isContinuousVoiceEnabled) startWakeWordListener();
+    }
+}
+
+function stopCommandListener() {
+    if (commandRecognition) {
+        try {
+            commandRecognition.onend = null;
+            commandRecognition.onerror = null;
+            commandRecognition.abort();
+        } catch (e) {}
+        commandRecognition = null;
+    }
+}
+
+function restartVoiceListener() {
+    cleanupVoice();
+    if (isContinuousVoiceEnabled) {
+        startWakeWordListener();
+    }
+}
+
+function cleanupVoice() {
+    stopWakeWordListener();
+    stopCommandListener();
+    stopManualRecognition();
+    stopSpeech();
+    updateVoiceState('STANDBY');
+}
+
+// Manual "Tap to Speak" Fallback
+function toggleVoiceInput() {
+    if (!SpeechRecognition) {
+        alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+        return;
+    }
+
+    if (manualRecognition) {
+        stopManualRecognition();
+        return;
+    }
+
+    stopWakeWordListener();
+    stopCommandListener();
+    stopSpeech();
+
+    try {
+        manualRecognition = new SpeechRecognition();
+        manualRecognition.continuous = false;
+        manualRecognition.interimResults = true;
+        manualRecognition.lang = 'en-US';
+
+        manualRecognition.onstart = () => {
+            isRecording = true;
+            updateVoiceState('LISTENING', 'Listening...');
+            if (voiceBtn) {
+                voiceBtn.classList.add('recording');
+                voiceBtn.title = 'Click to stop listening';
+            }
+        };
+
+        manualRecognition.onresult = (event) => {
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+            if (userInput) {
+                userInput.value = transcript;
+                userInput.focus();
+            }
+        };
+
+        manualRecognition.onerror = (event) => {
+            console.error('[JARVIS] Manual recognition error:', event.error);
+            stopManualRecognition();
+        };
+
+        manualRecognition.onend = () => {
+            isRecording = false;
+            manualRecognition = null;
+            if (voiceBtn) {
+                voiceBtn.classList.remove('recording');
+                voiceBtn.title = 'Speech to text input';
+            }
+            if (userInput && userInput.value.trim().length > 0) {
+                handleUserMessage(userInput.value, { fromVoice: true });
+            } else {
+                updateVoiceState('STANDBY');
+                if (isContinuousVoiceEnabled) setTimeout(startWakeWordListener, 400);
+            }
+        };
+
+        manualRecognition.start();
+    } catch (e) {
+        console.error('[JARVIS] Manual voice start failed:', e);
+        stopManualRecognition();
+    }
+}
+
+function stopManualRecognition() {
+    if (manualRecognition) {
+        try {
+            manualRecognition.abort();
+        } catch (e) {}
+        manualRecognition = null;
+    }
+    isRecording = false;
+    if (voiceBtn) {
+        voiceBtn.classList.remove('recording');
+        voiceBtn.title = 'Speech to text input';
+    }
+    updateVoiceState('STANDBY');
+    if (isContinuousVoiceEnabled && !isSpeakingTTS) {
+        setTimeout(startWakeWordListener, 300);
+    }
+}
+
+// ============================================================
+// TEXT-TO-SPEECH (TTS) ENGINE
+// ============================================================
+
 const synth = window.speechSynthesis;
 
-// ----------------------------------------------------------------
-// JARVIS Voice Configuration
-// Priority order matches the exact original laptop voice.
-// Falls back to closest male UK/US English voices rather than
-// silently picking the browser default (often a female voice).
-// ----------------------------------------------------------------
 const JARVIS_VOICE_PRIORITY = [
-    'Google UK English Male',   // Original JARVIS voice on Chrome/laptop
-    'Samantha',                  // Original JARVIS fallback (macOS/Safari)
-    'Daniel',                    // High-quality British male (macOS/iOS)
-    'Google US English',         // Chrome Android - neutral, male-ish default
-    'Microsoft David Desktop',   // Windows Edge male voice
-    'Microsoft Mark Online',     // Windows/Edge online male voice
-    'en-GB',                     // Match any en-GB voice as last resort
+    'Google UK English Male',   // Preferred Iron Man accent
+    'Samantha',                  // Clean fallback
+    'Daniel',                    // British male
+    'Google US English',         // Neutral English
+    'Microsoft David Desktop',   // Windows desktop voice
+    'Microsoft Mark Online',     // Edge voice
+    'en-GB',                     // British English
 ];
 
 const JARVIS_VOICE_SETTINGS = {
-    pitch: 0.9,   // Slightly lower - exact original JARVIS feel
-    rate: 1.0,    // Natural speed - exact original setting
+    pitch: 0.9,
+    rate: 1.0,
     volume: 1.0
 };
 
-// Cache voices after async load - never call getVoices() inline in speakMessage
 let cachedVoices = [];
 let jarvisVoice = null;
 
 function selectJarvisVoice(voices) {
     if (!voices || voices.length === 0) return null;
-
-    // Step 1: Try exact name matches in priority order
     for (const name of JARVIS_VOICE_PRIORITY) {
         const match = voices.find(v => v.name === name);
         if (match) return match;
     }
-
-    // Step 2: Partial name matches in priority order
     for (const name of JARVIS_VOICE_PRIORITY) {
         const match = voices.find(v => v.name.includes(name));
         if (match) return match;
     }
-
-    // Step 3: Any English male voice (avoid female defaults)
     const engMale = voices.find(v =>
         (v.lang.startsWith('en')) &&
         (v.name.toLowerCase().includes('male') || 
@@ -598,34 +1022,25 @@ function selectJarvisVoice(voices) {
          v.name.includes('Mark'))
     );
     if (engMale) return engMale;
-
-    // Step 4: Any en-GB voice as last resort before falling through
     const enGB = voices.find(v => v.lang === 'en-GB');
     if (enGB) return enGB;
-
-    // Step 5: If truly nothing matches, return null - let browser decide
-    // rather than assigning a random female voice
     return null;
 }
 
 function initJarvisVoice() {
+    if (!synth) return;
     const voices = synth.getVoices();
     if (voices && voices.length > 0) {
         cachedVoices = voices;
         jarvisVoice = selectJarvisVoice(voices);
         if (jarvisVoice) {
-            console.log(`JARVIS voice loaded: "${jarvisVoice.name}" (${jarvisVoice.lang})`);
-        } else {
-            console.warn('JARVIS: No preferred voice found, browser default will be used.');
+            console.log(`[JARVIS] Voice initialized: "${jarvisVoice.name}" (${jarvisVoice.lang})`);
         }
     }
 }
 
 if (synth) {
-    // Trigger immediate load (works on Firefox / some Chrome)
     initJarvisVoice();
-
-    // onvoiceschanged fires in Chrome after async load
     if (typeof speechSynthesis.onvoiceschanged !== 'undefined') {
         speechSynthesis.onvoiceschanged = initJarvisVoice;
     }
@@ -635,6 +1050,7 @@ function stopSpeech() {
     if (synth && synth.speaking) {
         synth.cancel();
     }
+    isSpeakingTTS = false;
     currentlySpeakingMsgId = null;
     updateSpeakerButtonsUI();
 }
@@ -644,49 +1060,72 @@ function toggleSpeechForMessage(text, msgId) {
         stopSpeech();
         return;
     }
-
     stopSpeech();
     speakMessage(text, msgId);
 }
 
-function speakMessage(text, msgId = null) {
-    if (!synth) return;
-    if (synth.speaking) {
-        synth.cancel();
+function speakMessage(text, msgId = null, onDoneCallback = null) {
+    if (!synth) {
+        if (onDoneCallback) onDoneCallback();
+        return;
     }
+
+    stopSpeech();
+
+    // Pause wake recognition while speaking to prevent self-triggering
+    isSpeakingTTS = true;
+    stopWakeWordListener();
+    stopCommandListener();
+    updateVoiceState('SPEAKING', 'Speaking...');
 
     currentlySpeakingMsgId = msgId;
     updateSpeakerButtonsUI();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    // Clean text for speech (strip markdown asterisks, code blocks, URLs)
+    const cleanSpeechText = text
+        .replace(/```[\s\S]*?```/g, 'Code block omitted.')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/https?:\/\/\S+/g, 'link')
+        .trim();
 
-    // Apply the cached JARVIS voice (resolved once at load, not inline each call)
+    const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
     if (jarvisVoice) {
         utterance.voice = jarvisVoice;
     }
-    // If jarvisVoice is null, do NOT assign utterance.voice - let browser use its
-    // default for this language rather than assigning a random wrong voice.
-
     utterance.pitch = JARVIS_VOICE_SETTINGS.pitch;
     utterance.rate = JARVIS_VOICE_SETTINGS.rate;
     utterance.volume = JARVIS_VOICE_SETTINGS.volume;
     utterance.lang = jarvisVoice ? jarvisVoice.lang : 'en-GB';
 
-    utterance.onstart = () => {
-        setOrbState('thinking');
-    };
-
     utterance.onend = () => {
+        isSpeakingTTS = false;
         currentlySpeakingMsgId = null;
         updateSpeakerButtonsUI();
-        setOrbState('idle');
+        if (onDoneCallback) {
+            onDoneCallback();
+        } else {
+            updateVoiceState('STANDBY');
+            if (isContinuousVoiceEnabled) {
+                setTimeout(startWakeWordListener, 400);
+            }
+        }
     };
 
     utterance.onerror = (e) => {
-        console.error('Speech error:', e);
+        console.error('[JARVIS] TTS error:', e);
+        isSpeakingTTS = false;
         currentlySpeakingMsgId = null;
         updateSpeakerButtonsUI();
-        setOrbState('idle');
+        if (onDoneCallback) {
+            onDoneCallback();
+        } else {
+            updateVoiceState('STANDBY');
+            if (isContinuousVoiceEnabled) {
+                setTimeout(startWakeWordListener, 400);
+            }
+        }
     };
 
     synth.speak(utterance);
@@ -708,12 +1147,6 @@ function updateSpeakerButtonsUI() {
     });
 }
 
-function setOrbState(state) {
-    if (!orb) return;
-    orb.classList.remove('listening', 'thinking');
-    if (state === 'listening') orb.classList.add('listening');
-    if (state === 'thinking') orb.classList.add('thinking');
-}
 
 function cleanAIResponse(text) {
     if (!text || typeof text !== 'string') return '';
@@ -933,15 +1366,15 @@ async function handleMemoryCommand(text) {
 // ============================================================
 
 async function getAIResponse(prompt, fileAttachment = null, conversationId = null, conversationMessages = []) {
-    setOrbState('thinking');
-    if (orbLabel) orbLabel.textContent = 'Thinking...';
+    updateVoiceState('PROCESSING', 'Thinking...');
 
     const systemPrompt = {
         role: 'system',
-        content: 'You are JARVIS, a personal AI assistant application created and developed by Kartik Aher. ' +
+        content: 'You are JARVIS, an intelligent, calm, fast, respectful, professional, and slightly futuristic personal AI assistant created and developed by Kartik Aher. ' +
+            'Personality & Tone: Calm, intelligent, fast, respectful, natural, professional, slightly futuristic. Be concise and direct during voice interactions (1-3 sentences suitable for speech), while being thorough and helpful during normal chat when coding, answering study questions, or explaining concepts. ' +
+            'Use natural assistant phrasing when appropriate (e.g. "Yes, Sir.", "Certainly, Sir.", "Opening Chrome.", "VS Code is open, Sir.", "That action requires your confirmation.", "Sir, the desktop agent is currently offline."), but do not make every response overly dramatic and do not constantly repeat "Sir" in every single sentence. ' +
             'If anyone asks who made you, who created you, who built you, who developed you, who owns you, or who is your creator, always answer that Kartik Aher created and developed this JARVIS application. ' +
             'Do NOT say Kartik Aher created OpenAI, Groq, or the underlying AI model — only that he built this JARVIS application. ' +
-            'Example response: "I was created and developed by Kartik Aher. The underlying AI model is provided by its respective AI provider." ' +
             'Output ONLY the direct final answer. Never output internal reasoning, thinking process, chain-of-thought, system prompts, developer instructions, or section headers like "Thinking Process" or "Analyze User Input". ' +
             'Keep answers concise, clear, and accurate. For simple questions, give a simple, direct answer.'
     };
@@ -953,10 +1386,8 @@ async function getAIResponse(prompt, fileAttachment = null, conversationId = nul
     // Build conversation context from the current conversation's history
     const formattedHistory = [];
     if (Array.isArray(conversationMessages) && conversationMessages.length > 0) {
-        // Exclude the last message (which is the current prompt we just added)
         const pastMsgs = conversationMessages.slice(0, -1);
         for (const msg of pastMsgs) {
-            // Ignore default initial greeting from assistant
             if (msg.text === DEFAULT_WELCOME_MSG && msg.sender === 'system') continue;
             if (!msg.text || typeof msg.text !== 'string' || !msg.text.trim()) continue;
 
@@ -999,21 +1430,24 @@ async function getAIResponse(prompt, fileAttachment = null, conversationId = nul
         const cleanedResponse = cleanAIResponse(rawContent);
         return cleanedResponse || "I apologize, Sir, but I received an empty response.";
     } catch (error) {
-        console.error('AI error:', error);
+        console.error('[JARVIS] AI error:', error);
         if (error.message === 'Failed to fetch') {
             return "I apologize, Sir. I encountered a network error connecting to the server backend.";
         }
         return `I apologize, Sir. ${error.message || "I'm having trouble connecting to my central processing unit."}`;
     } finally {
-        setOrbState('idle');
-        if (orbLabel) orbLabel.textContent = 'Tap to Speak';
+        if (!isSpeakingTTS && voiceState === 'PROCESSING') {
+            updateVoiceState('STANDBY');
+        }
     }
 }
 
 // User Message Processing
-async function handleUserMessage(text) {
+async function handleUserMessage(text, options = {}) {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    const fromVoice = options.fromVoice === true;
 
     let activeConv = getActiveConversation();
     if (!activeConv) {
@@ -1047,21 +1481,63 @@ async function handleUserMessage(text) {
     scrollToBottom(true);
     renderHistoryList();
 
-    // Check for memory commands (remember/forget/what do you remember)
+    // 1. Handle Pending Dangerous Action Confirmation (Shutdown / Restart)
+    if (pendingActionConfirmation) {
+        const lower = trimmed.toLowerCase();
+        const actionType = pendingActionConfirmation;
+        pendingActionConfirmation = null;
+
+        if (lower.includes('yes') || lower.includes('confirm') || lower.includes('proceed') || lower.includes('continue') || lower.includes('do it')) {
+            const confirmedAction = actionType === 'PROMPT_SHUTDOWN' ? 'CONFIRMED_SHUTDOWN' : 'CONFIRMED_RESTART';
+            const actionRes = await executeDesktopAction(confirmedAction);
+            const replyMsg = actionRes.success ? (actionRes.message || 'Action executed, Sir.') : (actionRes.message || 'Sir, the desktop agent is currently offline.');
+            addLocalSystemMessage(replyMsg, { speak: isAutoSpeakEnabled || fromVoice });
+            return;
+        } else {
+            addLocalSystemMessage("Action cancelled, Sir. Session remains active.", { speak: isAutoSpeakEnabled || fromVoice });
+            return;
+        }
+    }
+
+    // 2. Check for memory commands (remember/forget/what do you remember)
     const wasMemoryCommand = await handleMemoryCommand(trimmed);
     if (wasMemoryCommand) return;
 
+    // 3. Check for Direct Desktop Action (Chrome, VS Code, Calculator, YouTube, Folders, Lock PC, etc.)
+    const desktopActionMatch = matchDesktopAction(trimmed);
+    if (desktopActionMatch) {
+        updateVoiceState('PROCESSING', 'Thinking...');
+
+        if (desktopActionMatch.action === 'PROMPT_SHUTDOWN' || desktopActionMatch.action === 'PROMPT_RESTART') {
+            pendingActionConfirmation = desktopActionMatch.action;
+            addLocalSystemMessage(desktopActionMatch.speech, { speak: isAutoSpeakEnabled || fromVoice });
+            return;
+        }
+
+        const actionRes = await executeDesktopAction(desktopActionMatch.action, desktopActionMatch.target, desktopActionMatch.params);
+        let finalReply = '';
+
+        if (actionRes.error === 'DESKTOP_AGENT_OFFLINE') {
+            finalReply = "Sir, the desktop agent is currently offline.";
+        } else if (actionRes.success) {
+            finalReply = desktopActionMatch.speech || actionRes.message || 'Action completed, Sir.';
+        } else {
+            finalReply = actionRes.message || 'Sir, I was unable to execute the desktop action.';
+        }
+
+        addLocalSystemMessage(finalReply, { speak: isAutoSpeakEnabled || fromVoice });
+        return;
+    }
+
+    // 4. Normal AI Chat / Coding / Study / General Knowledge Question
     const convId = activeConv.id;
     const convMessages = [...activeConv.messages];
 
-    // Fetch AI response with full conversation context
     const responseText = await getAIResponse(trimmed, currentFile, convId, convMessages);
 
-    // Find the target conversation to ensure proper association even if view was switched
     let targetConv = conversations.find(c => c.id === convId);
     if (!targetConv) targetConv = getActiveConversation();
 
-    // Add AI message to state
     const aiMsgId = generateId('msg');
     const aiMsgObj = {
         id: aiMsgId,
@@ -1075,7 +1551,6 @@ async function handleUserMessage(text) {
         saveToStorage();
     }
 
-    // Render AI message to DOM only if the user is currently looking at this conversation
     const currentActive = getActiveConversation();
     if (currentActive && currentActive.id === convId) {
         renderMessageDOM(responseText, 'system', aiMsgId);
@@ -1083,9 +1558,14 @@ async function handleUserMessage(text) {
             scrollToBottom(false);
         }, 100);
 
-        // Speak if auto-read is enabled
-        if (isAutoSpeakEnabled) {
+        // Speak if auto-read is enabled OR if requested via voice interaction
+        if (isAutoSpeakEnabled || fromVoice) {
             speakMessage(responseText, aiMsgId);
+        } else {
+            updateVoiceState('STANDBY');
+            if (isContinuousVoiceEnabled && !isSpeakingTTS) {
+                setTimeout(startWakeWordListener, 300);
+            }
         }
     }
     renderHistoryList();
@@ -1093,7 +1573,7 @@ async function handleUserMessage(text) {
 
 // App Initialization
 window.addEventListener('load', () => {
-    console.log('JARVIS initialized with voice and file Q&A support');
+    console.log('[JARVIS] Initializing unified assistant application...');
     loadFromStorage();
 
     if (conversations.length === 0 || !activeConversationId || !getActiveConversation()) {
@@ -1109,9 +1589,19 @@ window.addEventListener('load', () => {
 
     // Load memory settings from server
     loadMemorySettings();
+
+    // Check desktop agent connection status
+    pollDesktopAgentStatus();
+
+    // Initialize voice and wake word listener if enabled
+    initializeVoice();
 });
 
 // UI Event Listeners
+if (enableVoiceBtn) {
+    enableVoiceBtn.addEventListener('click', toggleContinuousVoice);
+}
+
 if (newChatBtn) {
     newChatBtn.addEventListener('click', () => startNewChat(true));
 }
@@ -1233,13 +1723,10 @@ if (clearChatBtn) {
     });
 }
 
-// ============================================================
-// MEMORY SYSTEM EVENT LISTENERS
-// ============================================================
-
 // Memory toggle (enable/disable)
 if (memoryToggle) {
     memoryToggle.addEventListener('change', (e) => {
         updateMemorySettings(e.target.checked);
     });
 }
+
