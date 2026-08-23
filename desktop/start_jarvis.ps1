@@ -1,4 +1,4 @@
-﻿$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 $backendDir = Join-Path $projectRoot "backend"
 $mainPy = Join-Path $scriptDir "main.py"
@@ -21,4 +21,4 @@ if (-not (Test-Path $pythonwPath)) {
     $pythonwPath = "pythonw.exe"
 }
 
-Start-Process -FilePath $pythonwPath -ArgumentList "`"$mainPy`"" -WorkingDirectory $projectRoot -WindowStyle Hidden
+Start-Process -FilePath $pythonwPath -ArgumentList "-m desktop.main" -WorkingDirectory $projectRoot -WindowStyle Hidden
