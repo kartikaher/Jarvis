@@ -419,7 +419,47 @@ app.post('/api/upload', (req, res) => {
   });
 });
 
-// ---- Proxy endpoint for AI API calls (WITH MEMORY INTEGRATION) ----
+// Build optimized conversation messages with context window and summarization for long chats
+function buildOptimizedContext(messages, maxRecentTurns = 12) {
+  if (!messages || !Array.isArray(messages) || messages.length <= 1) return messages;
+
+  const systemMsg = messages[0];
+  const turns = messages.slice(1);
+
+  // If conversation turns fit within the recent window, send all turns verbatim
+  if (turns.length <= maxRecentTurns) {
+    return messages;
+  }
+
+  // Older turns that need summarization
+  const olderTurns = turns.slice(0, turns.length - maxRecentTurns);
+  const recentTurns = turns.slice(turns.length - maxRecentTurns);
+
+  // Build a structured concise recap of older turns
+  const summaryLines = [];
+  for (let i = 0; i < olderTurns.length; i++) {
+    const t = olderTurns[i];
+    if (!t || !t.content) continue;
+    const roleLabel = t.role === 'user' ? 'User asked' : 'JARVIS answered';
+    const cleanSnippet = t.content.replace(/\s+/g, ' ').trim();
+    const snippet = cleanSnippet.length > 140 ? cleanSnippet.substring(0, 140) + '...' : cleanSnippet;
+    summaryLines.push(`- ${roleLabel}: "${snippet}"`);
+  }
+
+  const olderSummaryBlock = summaryLines.length > 0
+    ? `\n\nPREVIOUS CONVERSATION RECAP (Topics discussed earlier in this chat session):\n${summaryLines.join('\n')}`
+    : '';
+
+  // Enhanced system message with earlier session recap
+  const enhancedSystemMsg = {
+    ...systemMsg,
+    content: systemMsg.content + olderSummaryBlock
+  };
+
+  return [enhancedSystemMsg, ...recentTurns];
+}
+
+// ---- Proxy endpoint for AI API calls (WITH MEMORY & CONVERSATION CONTEXT) ----
 
 app.post('/api/chat', (req, res) => {
   const apiKey = (process.env.GROQ_API_KEY || '').trim();
@@ -430,37 +470,49 @@ app.post('/api/chat', (req, res) => {
     });
   }
 
+  let inputMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
+
+  if (inputMessages.length === 0) {
+    return res.status(400).json({ error: { message: 'No messages provided.' } });
+  }
+
+  // Clone messages array to prevent mutating input
+  inputMessages = inputMessages.map(m => ({ ...m }));
+
   // ---- MEMORY INJECTION ----
   const memData = readMemoryFile();
   const memoryEnabled = memData.settings?.enabled !== false;
   let userMessage = '';
 
-  if (req.body.messages && Array.isArray(req.body.messages)) {
-    // Extract user message for memory detection later
-    const userMsg = [...req.body.messages].reverse().find(m => m.role === 'user');
-    userMessage = userMsg?.content || '';
+  // Extract the latest user message
+  const userMsg = [...inputMessages].reverse().find(m => m.role === 'user');
+  userMessage = userMsg?.content || '';
 
-    // Inject relevant memories into system prompt
-    if (memoryEnabled && memData.memories.length > 0) {
-      const relevant = getRelevantMemories(userMessage, memData.memories, 50);
-      if (relevant.length > 0) {
-        const systemMsg = req.body.messages.find(m => m.role === 'system');
-        if (systemMsg) {
-          const memoryContext = relevant.map(m => `- ${m.content}`).join('\n');
-          systemMsg.content += `\n\nLONG-TERM MEMORY (important things you remember about the user across conversations — use these to naturally personalize your answers. If the user explicitly asks what you remember or know about them, summarize these details naturally and warmly in conversation without mentioning any internal database, IDs, categories, or raw list formatting):\n${memoryContext}`;
-        }
+  // Inject relevant memories into system prompt
+  if (memoryEnabled && memData.memories.length > 0) {
+    const relevant = getRelevantMemories(userMessage, memData.memories, 50);
+    if (relevant.length > 0) {
+      const systemMsg = inputMessages.find(m => m.role === 'system');
+      if (systemMsg) {
+        const memoryContext = relevant.map(m => `- ${m.content}`).join('\n');
+        systemMsg.content += `\n\nLONG-TERM MEMORY (important things you remember about the user across conversations — use these to naturally personalize your answers. If the user explicitly asks what you remember or know about them, summarize these details naturally and warmly in conversation without mentioning any internal database, IDs, categories, or raw list formatting):\n${memoryContext}`;
       }
     }
   }
   // ---- END MEMORY INJECTION ----
+
+  // ---- CONVERSATION CONTEXT OPTIMIZATION ----
+  // Keeps recent turns verbatim and summarizes earlier turns for long chats
+  const optimizedMessages = buildOptimizedContext(inputMessages, 14);
+  // ---- END CONVERSATION CONTEXT OPTIMIZATION ----
 
   const targetUrl = 'https://api.groq.com/openai/v1/chat/completions';
   const selectedModel = process.env.GROQ_MODEL || req.body.model || 'openai/gpt-oss-120b';
 
   const bodyData = {
     model: selectedModel,
-    messages: req.body.messages,
-    max_tokens: req.body.max_tokens || 500
+    messages: optimizedMessages,
+    max_tokens: req.body.max_tokens || 800
   };
 
   const postData = JSON.stringify(bodyData);

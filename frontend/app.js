@@ -932,7 +932,7 @@ async function handleMemoryCommand(text) {
 // END MEMORY SYSTEM
 // ============================================================
 
-async function getAIResponse(prompt, fileAttachment = null) {
+async function getAIResponse(prompt, fileAttachment = null, conversationId = null, conversationMessages = []) {
     setOrbState('thinking');
     if (orbLabel) orbLabel.textContent = 'Thinking...';
 
@@ -950,6 +950,29 @@ async function getAIResponse(prompt, fileAttachment = null) {
         systemPrompt.content += `\n\nATTACHED DOCUMENT CONTEXT:\nDocument Filename: ${fileAttachment.filename}\nDocument Content:\n"""\n${fileAttachment.textContent}\n"""\nAnswer the user's questions accurately based strictly on the uploaded document contents. Do not invent information that is not present in the document. If the requested information is not in the document, state that clearly.`;
     }
 
+    // Build conversation context from the current conversation's history
+    const formattedHistory = [];
+    if (Array.isArray(conversationMessages) && conversationMessages.length > 0) {
+        // Exclude the last message (which is the current prompt we just added)
+        const pastMsgs = conversationMessages.slice(0, -1);
+        for (const msg of pastMsgs) {
+            // Ignore default initial greeting from assistant
+            if (msg.text === DEFAULT_WELCOME_MSG && msg.sender === 'system') continue;
+            if (!msg.text || typeof msg.text !== 'string' || !msg.text.trim()) continue;
+
+            formattedHistory.push({
+                role: msg.sender === 'user' ? 'user' : 'assistant',
+                content: msg.text
+            });
+        }
+    }
+
+    const payloadMessages = [
+        systemPrompt,
+        ...formattedHistory,
+        { role: 'user', content: prompt }
+    ];
+
     try {
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -957,11 +980,9 @@ async function getAIResponse(prompt, fileAttachment = null) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                messages: [
-                    systemPrompt,
-                    { role: 'user', content: prompt }
-                ],
-                max_tokens: 600
+                conversationId: conversationId || activeConversationId,
+                messages: payloadMessages,
+                max_tokens: 800
             })
         });
 
@@ -1030,8 +1051,15 @@ async function handleUserMessage(text) {
     const wasMemoryCommand = await handleMemoryCommand(trimmed);
     if (wasMemoryCommand) return;
 
-    // Fetch AI response
-    const responseText = await getAIResponse(trimmed, currentFile);
+    const convId = activeConv.id;
+    const convMessages = [...activeConv.messages];
+
+    // Fetch AI response with full conversation context
+    const responseText = await getAIResponse(trimmed, currentFile, convId, convMessages);
+
+    // Find the target conversation to ensure proper association even if view was switched
+    let targetConv = conversations.find(c => c.id === convId);
+    if (!targetConv) targetConv = getActiveConversation();
 
     // Add AI message to state
     const aiMsgId = generateId('msg');
@@ -1041,19 +1069,24 @@ async function handleUserMessage(text) {
         sender: 'system',
         timestamp: Date.now()
     };
-    activeConv.messages.push(aiMsgObj);
-    activeConv.updatedAt = Date.now();
-    saveToStorage();
+    if (targetConv) {
+        targetConv.messages.push(aiMsgObj);
+        targetConv.updatedAt = Date.now();
+        saveToStorage();
+    }
 
-    // Render AI message to DOM
-    renderMessageDOM(responseText, 'system', aiMsgId);
-    setTimeout(() => {
-        scrollToBottom(false);
-    }, 100);
+    // Render AI message to DOM only if the user is currently looking at this conversation
+    const currentActive = getActiveConversation();
+    if (currentActive && currentActive.id === convId) {
+        renderMessageDOM(responseText, 'system', aiMsgId);
+        setTimeout(() => {
+            scrollToBottom(false);
+        }, 100);
 
-    // Speak if auto-read is enabled
-    if (isAutoSpeakEnabled) {
-        speakMessage(responseText, aiMsgId);
+        // Speak if auto-read is enabled
+        if (isAutoSpeakEnabled) {
+            speakMessage(responseText, aiMsgId);
+        }
     }
     renderHistoryList();
 }
