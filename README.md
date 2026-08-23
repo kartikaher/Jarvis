@@ -1,91 +1,116 @@
-# JARVIS AI
+# JARVIS AI — Windows Desktop Voice Assistant + Web Chatbot
 
-A personal AI assistant with voice and text interaction, powered by OpenAI/Groq APIs.
+A reliable personal AI assistant for Windows with continuous background wake-word voice interaction ("Hey JARVIS"), system tray control, safe computer actions, multi-turn AI reasoning, and a full-featured web chatbot.
 
-## Project Structure
+---
+
+## Architecture Overview
 
 ```
 jarvis-ai/
-├── frontend/          # Static frontend (Render Static Site)
-│   ├── index.html     # Main HTML page
-│   ├── style.css      # Styles
-│   └── app.js         # Frontend JavaScript
-├── backend/           # Node.js API server (Render Web Service)
-│   ├── server.js      # Express proxy server
-│   └── package.json   # Backend dependencies
-├── render.yaml        # Render Blueprint for deployment
+├── desktop/                # Windows Desktop Voice Assistant (Background Agent)
+│   ├── main.py             # Main entry point & state coordinator
+│   ├── tray.py             # Windows System Tray icon & controls
+│   ├── wake_word.py        # Continuous "Hey JARVIS" detector
+│   ├── tts.py              # Exact Old JARVIS Voice (Microsoft David Desktop / UK-US English Male)
+│   ├── audio_stt.py        # Sounddevice recording + Google STT with noise calibration
+│   ├── state.py            # State machine (STANDBY -> LISTENING -> THINKING -> EXECUTING -> SPEAKING)
+│   ├── actions.py          # Safe Action System (strict allowlists, zero raw shell commands)
+│   ├── autostart.py        # Windows Startup registry management
+│   ├── backend_client.py   # Secure client communicating with local backend proxy
+│   ├── config.py           # Persistent configuration manager
+│   ├── start_jarvis.vbs    # Invisible background launcher (no command windows)
+│   ├── run_jarvis.bat      # Console launcher for testing
+│   └── requirements.txt    # Python dependencies
+├── backend/                # Node.js Express Backend Proxy
+│   ├── server.js           # Groq proxy (gpt-oss-120b), file parser, long-term memory
+│   ├── package.json        # Backend dependencies
+│   ├── .env                # Protected environment variables (GROQ_API_KEY)
+│   └── data/               # Persistent file-based memory database
+├── frontend/               # Web Chatbot Interface (Preserved)
+│   ├── index.html          # Web UI
+│   ├── style.css           # Glassmorphism dark theme styling
+│   └── app.js              # Multi-chat, file Q&A, voice & memory management
 └── README.md
 ```
 
-## Deployment on Render
+---
 
-### Option 1: Blueprint (Recommended)
+## Key Features
 
-1. Push this repo to GitHub
-2. Go to [Render Dashboard](https://dashboard.render.com)
-3. Click **New → Blueprint**
-4. Connect your GitHub repo and select this repository
-5. Render will auto-detect `render.yaml` and create both services
+### 1. Windows Desktop Voice Assistant
+- **Zero Popup Windows on Startup**: Starts in the background as a System Tray icon.
+- **Start with Windows**: Toggle ON/OFF via tray menu or configuration.
+- **Wake Word Detection**: Responds to **"Hey JARVIS"** or **"JARVIS"** in `STANDBY` mode without clicking any buttons.
+- **Exact Voice Preservation**: SAPI5 male English voice (`Microsoft David Desktop`) tuned to `pitch: 0.9` and `rate: 1.0` matching the original JARVIS feel.
+- **Voice States**: `STANDBY`, `LISTENING`, `THINKING`, `EXECUTING`, `SPEAKING`, `OFFLINE`, `DISABLED`.
 
-### Option 2: Manual Setup
+### 2. Safe Computer Action System
+- **Strict Allowlists**: Never executes raw shell commands or allows unsafe file/registry access.
+- **Supported Direct Voice Commands**:
+  - Open YouTube, Google, Gmail, Spotify, WhatsApp, Chrome
+  - Open approved apps: Calculator, Notepad, File Explorer, VS Code, Task Manager, Settings
+  - Open approved folders: Downloads, Documents, Desktop, Pictures, Videos, Project
+  - Google Search & YouTube Search ("search youtube for ...")
+  - System diagnostics: Battery percentage & charging status, current time & date, system health
+  - Lock computer ("lock my computer")
+  - Cancellation ("cancel", "stop", "never mind")
+  - Standby ("go to sleep", "standby")
 
-#### Backend (Web Service)
-1. **New → Web Service** on Render
-2. Connect your repo
-3. Settings:
-   - **Root Directory**: `backend`
-   - **Runtime**: Node
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-4. Add environment variable:
-   - `FRONTEND_URL` = your frontend URL (e.g., `https://jarvis-frontend.onrender.com`)
+### 3. Sensitive Action Confirmation
+- Sensitive actions (such as sending WhatsApp messages, shutdown, restart) trigger a confirmation state:
+  > **User:** "Send Rahul: I will call you later."  
+  > **JARVIS:** "I have the message for Rahul ready: 'I will call you later.'. Should I open WhatsApp to send it?"  
+  > **User:** "Yes."  
+  > **JARVIS:** Opens WhatsApp with the drafted message.
 
-#### Frontend (Static Site)
-1. **New → Static Site** on Render
-2. Connect your repo
-3. Settings:
-   - **Root Directory**: `frontend`
-   - **Publish Directory**: `.` (current directory)
+### 4. Multi-Turn AI Context & Long-Term Memory
+- Maintains conversational memory for natural follow-ups (e.g. *"What is TCP?"* → *"Advantages?"* → *"Explain the second one."*).
+- Long-term memory persists facts and user preferences across chats without overwriting old memories.
+- `GROQ_API_KEY` is kept strictly on the backend and never exposed to the client.
 
-### Post-Deployment Configuration
+### 5. Web Chatbot (100% Preserved)
+- Web-based chat with multi-session history, file upload (PDF, TXT, DOCX), long-term memory toggle, and Web Speech API.
 
-After both services are deployed:
+---
 
-1. **Get your backend URL** from Render (e.g., `https://jarvis-backend.onrender.com`)
-2. **Update the frontend** `app.js`: Change the `API_BASE_URL` line:
-   ```javascript
-   const API_BASE_URL = window.JARVIS_API_URL || 'https://jarvis-backend.onrender.com';
+## Setup and Running
+
+### 1. Configure Backend & API Key
+1. Navigate to the `backend/` directory:
+   ```bash
+   cd backend
+   npm install
    ```
-   Or add a config script tag in `index.html` before `app.js`:
-   ```html
-   <script>window.JARVIS_API_URL = 'https://jarvis-backend.onrender.com';</script>
+2. Open `backend/.env` and set your Groq API key:
+   ```env
+   GROQ_API_KEY=gsk_your_actual_groq_api_key_here
+   GROQ_MODEL=openai/gpt-oss-120b
    ```
-3. **Set FRONTEND_URL** on the backend service environment variables to your frontend's URL
+3. Start the backend:
+   ```bash
+   npm start
+   # Server runs on http://localhost:10000
+   ```
 
-## Local Development
+### 2. Run Windows Desktop Voice Assistant
+1. Install Python dependencies:
+   ```bash
+   python -m pip install -r desktop/requirements.txt
+   ```
+2. Start the Desktop Assistant:
+   - **For testing with console logs**: Run `desktop/run_jarvis.bat` or `python desktop/main.py`.
+   - **For silent background operation**: Double-click `desktop/start_jarvis.vbs`.
 
-### Backend
-```bash
-cd backend
-npm install
-npm start
-# Server runs on http://localhost:10000
-```
+---
 
-### Frontend
-Open `frontend/index.html` directly in a browser, or use a simple HTTP server:
-```bash
-cd frontend
-npx serve .
-```
+## System Tray Controls
 
-For local development, the frontend defaults to same-origin requests, so you can run both together or set `window.JARVIS_API_URL = 'http://localhost:10000'` in the browser console.
-
-## Features
-
-- 🎤 Voice input via Web Speech API
-- 🔊 Text-to-speech responses
-- 💬 Text chat interface
-- 🔑 Supports OpenAI and Groq API keys
-- 🎨 Premium glassmorphism UI with animated orb
-- 💾 Chat history persisted in localStorage
+Right-click the **JARVIS Arc-Reactor icon** in the Windows Taskbar Notification Area (System Tray) to access:
+- **Status Indicator** (`Status: STANDBY`, `LISTENING`, `SPEAKING`, etc.)
+- **JARVIS Enabled** (ON/OFF)
+- **Wake Word ('Hey JARVIS')** (ON/OFF)
+- **Voice Speech** (ON/OFF)
+- **Start JARVIS with Windows** (ON/OFF)
+- **Open Web JARVIS** (Launches `http://localhost:10000` in browser)
+- **Exit JARVIS**
