@@ -1,5 +1,76 @@
 {
-  "memories": [],
+  "memories": [
+    {
+      "id": "mem_1787484911638_11gwl",
+      "content": "User's name is Kartik",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.638Z",
+      "updatedAt": "2026-08-23T11:35:11.638Z"
+    },
+    {
+      "id": "mem_1787484911657_rkerh",
+      "content": "User is studying B.Tech CSE",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.657Z",
+      "updatedAt": "2026-08-23T11:35:11.657Z"
+    },
+    {
+      "id": "mem_1787484911663_w24nu",
+      "content": "User's favorite programming language is C++",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.663Z",
+      "updatedAt": "2026-08-23T11:35:11.663Z"
+    },
+    {
+      "id": "mem_1787484911670_xewa9",
+      "content": "User likes Python for scripting and automation",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.670Z",
+      "updatedAt": "2026-08-23T11:35:11.670Z"
+    },
+    {
+      "id": "mem_1787484911676_49do0",
+      "content": "User is preparing for the GATE exam",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.676Z",
+      "updatedAt": "2026-08-23T11:35:11.676Z"
+    },
+    {
+      "id": "mem_1787484911682_wtyt4",
+      "content": "User prefers concise and direct technical explanations",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.682Z",
+      "updatedAt": "2026-08-23T11:35:11.682Z"
+    },
+    {
+      "id": "mem_1787484911696_kvunk",
+      "content": "User is working on building an autonomous personal AI assistant named JARVIS",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.696Z",
+      "updatedAt": "2026-08-23T11:35:11.696Z"
+    },
+    {
+      "id": "mem_1787484911703_gc248",
+      "content": "User's favorite computer science subject is Operating Systems",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.703Z",
+      "updatedAt": "2026-08-23T11:35:11.703Z"
+    },
+    {
+      "id": "mem_1787484911710_9p4jn",
+      "content": "User prefers dark mode interfaces with glassmorphic aesthetics",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.710Z",
+      "updatedAt": "2026-08-23T11:35:11.710Z"
+    },
+    {
+      "id": "mem_1787484911716_ndv43",
+      "content": "User likes reading about distributed systems and AI architecture",
+      "category": "fact",
+      "createdAt": "2026-08-23T11:35:11.716Z",
+      "updatedAt": "2026-08-23T11:35:11.716Z"
+    }
+  ],
   "settings": {
     "enabled": true
   }

@@ -27,7 +27,7 @@ app.use(express.static(path.join(__dirname, '..', 'frontend')));
 // ============================================================
 
 const MEMORY_FILE = path.join(__dirname, 'data', 'memories.json');
-const MAX_MEMORIES = 100;
+const MAX_MEMORIES = 1000;
 
 function readMemoryFile() {
   try {
@@ -79,8 +79,8 @@ function containsSensitiveData(text) {
   return SENSITIVE_PATTERNS.some(pattern => pattern.test(text));
 }
 
-// Get relevant memories for a user message
-function getRelevantMemories(userMessage, memories, maxCount = 20) {
+// Get relevant memories for a user message (returns up to maxCount, or all if <= maxCount)
+function getRelevantMemories(userMessage, memories, maxCount = 50) {
   if (!memories || memories.length === 0) return [];
   if (memories.length <= maxCount) return memories;
 
@@ -91,7 +91,7 @@ function getRelevantMemories(userMessage, memories, maxCount = 20) {
     let score = 0;
     for (const word of words) {
       if (memWords.some(mw => mw.includes(word) || word.includes(mw))) {
-        score++;
+        score += 2;
       }
     }
     // Boost recent memories
@@ -104,20 +104,6 @@ function getRelevantMemories(userMessage, memories, maxCount = 20) {
 
   scored.sort((a, b) => b._score - a._score);
   return scored.slice(0, maxCount).map(({ _score, ...mem }) => mem);
-}
-
-// Find existing memory that overlaps with new content in the same category
-function findConflictingMemory(memories, newContent, newCategory) {
-  const newWords = new Set(newContent.toLowerCase().split(/\s+/).filter(w => w.length > 2));
-
-  for (const mem of memories) {
-    if (mem.category !== newCategory) continue;
-    const memWords = mem.content.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    const overlap = memWords.filter(w => newWords.has(w)).length;
-    const overlapRatio = overlap / Math.max(memWords.length, 1);
-    if (overlapRatio >= 0.4) return mem;
-  }
-  return null;
 }
 
 // Make a Groq API call (used for memory detection)
@@ -179,29 +165,25 @@ async function detectAndSaveMemories(userMessage) {
     if (data.memories.length >= MAX_MEMORIES) return;
 
     const existingList = data.memories.length > 0
-      ? '\n\nEXISTING MEMORIES (avoid duplicates — if info changed, include "updateId" with the memory ID):\n' +
-        data.memories.map(m => `[${m.id}] (${m.category}) ${m.content}`).join('\n')
+      ? '\n\nEXISTING MEMORIES (do NOT re-extract identical facts):\n' +
+        data.memories.map(m => `- ${m.content}`).join('\n')
       : '';
 
-    const systemPrompt = `You are a memory extraction system for a personal AI assistant named JARVIS. Analyze the user's message and extract personal facts, preferences, or instructions they explicitly stated about themselves.
+    const systemPrompt = `You are a memory extraction system for a personal AI assistant named JARVIS. Analyze the user's message and extract any personal facts, preferences, background, goals, habits, interests, or instructions they stated about themselves.
 
 Rules:
-1. ONLY extract what the user explicitly states about themselves.
-2. Do NOT extract: questions, requests, greetings, commands to the AI, conversational filler, or things the user is asking about (not stating).
+1. Extract ALL useful facts or preferences the user states about themselves (e.g. name, role, studies, goals, favorite tools/languages/hobbies, preferences, location).
+2. Do NOT extract: questions, generic conversational filler, things the user is asking about (not stating), or temporary one-time chatter.
 3. NEVER extract sensitive data: passwords, API keys, tokens, bank details, credit cards, SSN, security credentials, secret keys, PINs.
-4. Keep each memory concise (one short sentence, starting with "User").
-5. Categorize as: "preference" (likes/dislikes/choices), "fact" (personal info, studies, work, name, age, location), or "instruction" (response style preferences, how to address them).
-6. If the user's message updates information from an existing memory, include "updateId" with that memory's ID.
-7. Return ONLY valid JSON. No markdown, no explanation, no code blocks.
-
-Format: {"memories": [{"content": "...", "category": "preference|fact|instruction"}]}
-For updates: {"memories": [{"content": "...", "category": "...", "updateId": "mem_xxx"}]}
-If nothing to save: {"memories": []}${existingList}`;
+4. Keep each memory concise (one short factual statement starting with "User", e.g. "User prefers C++", "User is studying B.Tech CSE", "User's name is Kartik").
+5. Categorize as: "preference", "fact", or "instruction".
+6. Never overwrite unrelated existing memories. Return each distinct fact as a separate memory item in the array.
+7. Return ONLY valid JSON: {"memories": [{"content": "...", "category": "preference|fact|instruction"}]} or {"memories": []} if nothing to save.${existingList}`;
 
     const response = await callGroqAPI([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage }
-    ], 300);
+    ], 400);
 
     // Clean response — extract JSON
     let cleaned = response.trim();
@@ -221,42 +203,26 @@ If nothing to save: {"memories": []}${existingList}`;
     for (const mem of result.memories) {
       if (!mem.content || typeof mem.content !== 'string') continue;
       if (containsSensitiveData(mem.content)) continue;
-      if (mem.content.trim().length < 3 || mem.content.length > 500) continue;
+      const trimmed = mem.content.trim();
+      if (trimmed.length < 3 || trimmed.length > 500) continue;
 
       const category = ['preference', 'fact', 'instruction'].includes(mem.category) ? mem.category : 'fact';
 
-      // Check for update via AI-provided ID
-      if (mem.updateId) {
-        const existing = data.memories.find(m => m.id === mem.updateId);
-        if (existing) {
-          existing.content = mem.content.trim();
-          existing.category = category;
-          existing.updatedAt = now;
-          console.log(`Memory updated [${existing.id}]: ${mem.content}`);
-          continue;
-        }
-      }
+      // Check if identical memory already exists
+      const alreadyExists = data.memories.some(m => m.content.toLowerCase().trim() === trimmed.toLowerCase());
+      if (alreadyExists) continue;
 
-      // Server-side conflict check (fallback)
-      const conflict = findConflictingMemory(data.memories, mem.content, category);
-      if (conflict) {
-        conflict.content = mem.content.trim();
-        conflict.updatedAt = now;
-        console.log(`Memory updated (conflict) [${conflict.id}]: ${mem.content}`);
-        continue;
-      }
-
-      // Create new memory
+      // Add new memory without overwriting old memories
       if (data.memories.length < MAX_MEMORIES) {
         const newMem = {
           id: generateMemoryId(),
-          content: mem.content.trim(),
+          content: trimmed,
           category,
           createdAt: now,
           updatedAt: now
         };
         data.memories.push(newMem);
-        console.log(`Memory created [${newMem.id}]: ${mem.content}`);
+        console.log(`Memory saved [${newMem.id}]: ${trimmed}`);
       }
     }
 
@@ -295,24 +261,22 @@ app.post('/api/memories', (req, res) => {
 
   const data = readMemoryFile();
   if (data.memories.length >= MAX_MEMORIES) {
-    return res.status(400).json({ error: { message: `Memory limit reached (${MAX_MEMORIES}). Delete some memories first.` } });
+    return res.status(400).json({ error: { message: `Memory limit reached (${MAX_MEMORIES}).` } });
   }
 
   const validCategory = ['preference', 'fact', 'instruction'].includes(category) ? category : 'fact';
+  const trimmed = content.trim();
   const now = new Date().toISOString();
 
-  // Check for conflicting memory — update instead of duplicating
-  const conflict = findConflictingMemory(data.memories, content, validCategory);
-  if (conflict) {
-    conflict.content = content.trim();
-    conflict.updatedAt = now;
-    writeMemoryFile(data);
-    return res.json({ success: true, memory: conflict, action: 'updated' });
+  // If exact duplicate already exists, return existing
+  const existing = data.memories.find(m => m.content.toLowerCase().trim() === trimmed.toLowerCase());
+  if (existing) {
+    return res.json({ success: true, memory: existing, action: 'existing' });
   }
 
   const newMemory = {
     id: generateMemoryId(),
-    content: content.trim(),
+    content: trimmed,
     category: validCategory,
     createdAt: now,
     updatedAt: now
@@ -478,12 +442,12 @@ app.post('/api/chat', (req, res) => {
 
     // Inject relevant memories into system prompt
     if (memoryEnabled && memData.memories.length > 0) {
-      const relevant = getRelevantMemories(userMessage, memData.memories);
+      const relevant = getRelevantMemories(userMessage, memData.memories, 50);
       if (relevant.length > 0) {
         const systemMsg = req.body.messages.find(m => m.role === 'system');
         if (systemMsg) {
           const memoryContext = relevant.map(m => `- ${m.content}`).join('\n');
-          systemMsg.content += `\n\nLONG-TERM MEMORY (important things you remember about the user — use these to personalize your responses when relevant, but do not mention having a "memory system" unless asked):\n${memoryContext}`;
+          systemMsg.content += `\n\nLONG-TERM MEMORY (important things you remember about the user across conversations — use these to naturally personalize your answers. If the user explicitly asks what you remember or know about them, summarize these details naturally and warmly in conversation without mentioning any internal database, IDs, categories, or raw list formatting):\n${memoryContext}`;
         }
       }
     }

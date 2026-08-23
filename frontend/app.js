@@ -41,15 +41,6 @@ const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
 
 // Memory System Elements
 const memoryToggle = document.getElementById('memory-toggle');
-const showMemoriesBtn = document.getElementById('show-memories-btn');
-const memoryModal = document.getElementById('memory-modal');
-const memoryListEl = document.getElementById('memory-list');
-const memoryEmptyEl = document.getElementById('memory-empty');
-const closeMemoryModal = document.getElementById('close-memory-modal');
-const clearAllMemoriesBtn = document.getElementById('clear-all-memories-btn');
-const clearMemoriesConfirmModal = document.getElementById('clear-memories-confirm-modal');
-const cancelClearMemories = document.getElementById('cancel-clear-memories');
-const confirmClearMemories = document.getElementById('confirm-clear-memories');
 
 // State Management
 let conversations = [];
@@ -920,97 +911,21 @@ async function handleMemoryCommand(text) {
         return true;
     }
 
-    // "What do you remember?" / "What do you know about me?"
-    if (lower.includes('what do you remember') || lower.includes('what do you know about me') ||
-        lower.includes('show my memories') || lower.includes('list my memories') ||
-        lower.includes('show memories') || lower.includes('what have you memorized')) {
-        const memories = await fetchMemories();
-        if (memories.length === 0) {
-            addLocalSystemMessage("I don't have any saved memories yet, Sir. I'll learn as we talk.");
-        } else {
-            let response = "Here's what I remember about you, Sir:\n\n";
-            memories.forEach(m => {
-                const icon = m.category === 'preference' ? '💡' : m.category === 'instruction' ? '📝' : '📌';
-                response += `${icon} ${m.content}\n`;
-            });
-            response += `\nTotal: ${memories.length} ${memories.length === 1 ? 'memory' : 'memories'}.`;
-            addLocalSystemMessage(response);
-        }
-        return true;
-    }
-
     // "Forget everything" / "Clear all memories"
     if (lower === 'forget everything' || lower === 'clear all memories' ||
         lower === 'forget everything you remember' || lower === 'delete all memories' ||
-        lower === 'forget everything about me') {
+        lower === 'forget everything about me' || lower.includes('forget everything you remember about me')) {
         const memories = await fetchMemories();
         if (memories.length === 0) {
             addLocalSystemMessage("I don't have any memories to clear, Sir.");
             return true;
         }
         pendingMemoryClear = true;
-        addLocalSystemMessage(`Are you sure you want me to forget everything, Sir? I currently have ${memories.length} ${memories.length === 1 ? 'memory' : 'memories'} saved. Say "Yes, forget everything" to confirm, or anything else to cancel.`);
+        addLocalSystemMessage("Are you sure you want me to forget everything, Sir? Say \"Yes, forget everything\" to confirm, or anything else to cancel.");
         return true;
     }
 
     return false;
-}
-
-// Render memory viewer modal content
-async function renderMemoryViewer() {
-    if (!memoryListEl || !memoryEmptyEl) return;
-    memoryListEl.innerHTML = '';
-
-    const memories = await fetchMemories();
-
-    if (memories.length === 0) {
-        memoryEmptyEl.style.display = 'flex';
-        memoryListEl.style.display = 'none';
-        if (clearAllMemoriesBtn) clearAllMemoriesBtn.style.display = 'none';
-        return;
-    }
-
-    memoryEmptyEl.style.display = 'none';
-    memoryListEl.style.display = 'flex';
-    if (clearAllMemoriesBtn) clearAllMemoriesBtn.style.display = '';
-
-    // Sort by updatedAt desc
-    memories.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-
-    memories.forEach(mem => {
-        const card = document.createElement('div');
-        card.className = 'memory-card';
-        card.setAttribute('data-memory-id', mem.id);
-
-        const dateStr = formatDate(new Date(mem.updatedAt || mem.createdAt).getTime());
-
-        card.innerHTML = `
-            <div class="memory-card-header">
-                <span class="memory-card-content">${escapeHTML(mem.content)}</span>
-                <button class="memory-delete-btn" title="Delete this memory" data-id="${mem.id}">
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
-                </button>
-            </div>
-            <div class="memory-card-footer">
-                <span class="memory-category ${escapeHTML(mem.category || 'fact')}">${escapeHTML(mem.category || 'fact')}</span>
-                <span class="memory-date">${dateStr}</span>
-            </div>
-        `;
-
-        const delBtn = card.querySelector('.memory-delete-btn');
-        delBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const success = await deleteMemory(mem.id);
-            if (success) {
-                card.style.opacity = '0';
-                card.style.transform = 'translateX(20px)';
-                card.style.transition = 'all 0.3s ease';
-                setTimeout(() => renderMemoryViewer(), 300);
-            }
-        });
-
-        memoryListEl.appendChild(card);
-    });
 }
 
 // ============================================================
@@ -1293,44 +1208,5 @@ if (clearChatBtn) {
 if (memoryToggle) {
     memoryToggle.addEventListener('change', (e) => {
         updateMemorySettings(e.target.checked);
-    });
-}
-
-// Show Memories button → open memory viewer
-if (showMemoriesBtn) {
-    showMemoriesBtn.addEventListener('click', () => {
-        if (settingsModal) settingsModal.style.display = 'none';
-        renderMemoryViewer();
-        if (memoryModal) memoryModal.style.display = 'flex';
-    });
-}
-
-// Close memory viewer modal
-if (closeMemoryModal) {
-    closeMemoryModal.addEventListener('click', () => {
-        if (memoryModal) memoryModal.style.display = 'none';
-    });
-}
-
-// Clear All Memories button → show confirmation
-if (clearAllMemoriesBtn) {
-    clearAllMemoriesBtn.addEventListener('click', () => {
-        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'flex';
-    });
-}
-
-// Cancel clear all memories
-if (cancelClearMemories) {
-    cancelClearMemories.addEventListener('click', () => {
-        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'none';
-    });
-}
-
-// Confirm clear all memories
-if (confirmClearMemories) {
-    confirmClearMemories.addEventListener('click', async () => {
-        await deleteAllMemories();
-        if (clearMemoriesConfirmModal) clearMemoriesConfirmModal.style.display = 'none';
-        renderMemoryViewer(); // refresh the memory list (now empty)
     });
 }
