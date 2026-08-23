@@ -4,10 +4,16 @@ Runs silently in the Windows background with System Tray integration.
 Coordinates Wake Word detection, Voice State Machine, Speech-To-Text,
 Safe Action Execution, AI Conversation (via Backend Proxy), and TTS.
 """
+import os
 import sys
 import time
 import threading
 import signal
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from desktop.config import load_config, get_setting, update_setting
 from desktop.autostart import is_autostart_enabled, set_autostart
