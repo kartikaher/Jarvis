@@ -153,11 +153,15 @@ class BackendClient:
         if self.is_polling:
             return
         self.is_polling = True
-        print(f"[JARVIS] Desktop agent connected: {self.device_name}")
+        targets = self.get_target_urls()
+        print(f"[JARVIS] Desktop agent connected: {self.device_name} (Targets: {targets})")
 
         def _loop():
             while self.is_polling:
-                self.poll_and_execute()
+                try:
+                    self.poll_and_execute()
+                except Exception as e:
+                    pass
                 time.sleep(1.5)
 
         self._poll_thread = threading.Thread(target=_loop, daemon=True)
@@ -169,3 +173,4 @@ class BackendClient:
 
 # Global instance
 backend_client = BackendClient()
+
